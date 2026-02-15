@@ -1,0 +1,5 @@
+groq>=0.4.0
+python-dotenv
+flask
+flask-cors
+requests
