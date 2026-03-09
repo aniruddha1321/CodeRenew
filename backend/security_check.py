@@ -101,16 +101,89 @@ def extract_line_number(code: str, flagged_code: str) -> int:
     return 1  # Default to line 1 if not found
 
 
-def ai_security_check(code: str, filename: str = "code.py", model_name: str = None) -> list:
+def ai_security_check(code: str, filename: str = "code.py", model_name: str = None, language: str = "python") -> list:
     """
-    Perform AI-powered security analysis on Python code.
+    Perform AI-powered security analysis on code.
+    Supports both Python and Java code analysis.
     Returns a list of security issues in the required format.
     """
     if model_name is None:
         model_name = MODEL_NAME
     
-    system_prompt = """
-You are a security auditing assistant integrated into a desktop application called *Legacy Code Modernizer*.
+    if language == "java":
+        system_prompt = """
+You are a security auditing assistant integrated into a desktop application called *Code Renew*.
+Your task is to analyze Java source code and identify any *security vulnerabilities, bad practices, or compliance risks*, then classify them and suggest improvements.
+
+### Requirements
+Please scan the provided Java code and return a list of all identified issues, using the structured output format below.
+For *each issue*, include the following fields:
+- *risk_level*: One of "high", "medium", or "low" (lowercase)
+- *issue_title*: A 2-4 word summary of the issue (e.g., "SQL Injection Risk", "Insecure Deserialization")
+- *description*: One sentence describing the issue and why it matters
+- *flagged_code*: The exact line(s) or snippet that triggered the issue
+- *recommended_code*: The corrected/secure version of the flagged_code that should replace it
+- *suggested_fix*: A clear recommendation for modern, secure Java code
+- *compliance_category*: Must be exactly one of: "HIPAA", "ISO27001", or "General"
+
+### What to Look For
+
+#### General Security Issues
+- SQL injection via JDBC (string concatenation in queries)
+- Insecure deserialization (ObjectInputStream without validation)
+- Missing null checks leading to NullPointerException
+- Hardcoded secrets, passwords, or API keys
+- Weak exception handling that exposes stack traces
+- Missing input validation or sanitation
+- Unsecured file or network access
+- Use of deprecated or insecure APIs
+- Command injection risks (Runtime.exec with user input)
+- Path traversal vulnerabilities
+- Insecure random number generation (java.util.Random vs SecureRandom)
+- Missing authentication or authorization checks
+- XML External Entity (XXE) vulnerabilities
+- Cross-site scripting (XSS) in web contexts
+- Improper resource management (unclosed streams/connections)
+
+#### HIPAA-Specific Risks
+- Exposure of PHI (e.g., names, health records, account IDs)
+- Logging PHI or storing it unencrypted
+- Lack of access control or audit logs for sensitive data
+- Missing encryption for storage or transmission of health data
+
+#### ISO 27001-Specific Risks
+- Hardcoded secrets (violates control A.9.2, A.10.1)
+- No traceability or audit logging (A.12.4)
+- Use of insecure libraries without validation
+- Lack of authentication or access control
+- Missing input validation (A.14.2)
+- Weak cryptography (A.10.1)
+
+### Output Format (return in JSON)
+Return ONLY a valid JSON array. Do not include any markdown formatting or additional text.
+[
+  {
+    "risk_level": "high",
+    "issue_title": "SQL Injection Risk",
+    "description": "User input is directly concatenated into SQL query, allowing SQL injection attacks.",
+    "flagged_code": "String query = \"SELECT * FROM users WHERE id = \" + userId;",
+    "recommended_code": "PreparedStatement stmt = conn.prepareStatement(\"SELECT * FROM users WHERE id = ?\"); stmt.setString(1, userId);",
+    "suggested_fix": "Use PreparedStatement with parameterized queries to prevent SQL injection.",
+    "compliance_category": "General"
+  }
+]
+
+### Guidelines
+- If no issues are found, return an *empty array*: []
+- Analyze *both syntax and semantic meaning* of the code
+- Return *specific, actionable recommendations*
+- Focus on real security issues, not style preferences
+- Be thorough but avoid false positives
+"""
+        user_message = f"Analyze this Java code for security issues:\n\n{code}"
+    else:
+        system_prompt = """
+You are a security auditing assistant integrated into a desktop application called *Code Renew*.
 Your task is to analyze Python source code and identify any *security vulnerabilities, bad practices, or compliance risks*, then classify them and suggest improvements.
 
 ### Requirements
@@ -180,6 +253,7 @@ Return ONLY a valid JSON array. Do not include any markdown formatting or additi
 - Focus on real security issues, not style preferences
 - Be thorough but avoid false positives
 """
+        user_message = f"Analyze this Python code for security issues:\n\n{code}"
 
     try:
         client = get_groq_client()
@@ -193,7 +267,7 @@ Return ONLY a valid JSON array. Do not include any markdown formatting or additi
                 model_name=effective_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Analyze this Python code for security issues:\n\n{code}"},
+                    {"role": "user", "content": user_message},
                 ]
             )
         except ImportError:
@@ -203,7 +277,7 @@ Return ONLY a valid JSON array. Do not include any markdown formatting or additi
                 model=effective_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Analyze this Python code for security issues:\n\n{code}"},
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=temperature,
             )

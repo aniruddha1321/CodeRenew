@@ -29,7 +29,7 @@ const SummaryReport: React.FC = () => {
   const extractKeyChanges = (explanation: string): string[] => {
     const lines = explanation.split('\n').filter(line => line.trim());
     const keyChanges: string[] = [];
-    
+
     // Priority patterns for most important changes
     const priorityPatterns = [
       /type (hints|annotations)/i,
@@ -45,12 +45,12 @@ const SummaryReport: React.FC = () => {
       /f-string|format/i,
       /walrus operator|:=/i,
     ];
-    
+
     // First pass: Look for lines with priority patterns
     for (const line of lines) {
       const cleanLine = cleanMarkdown(line);
       if (!cleanLine) continue;
-      
+
       for (const pattern of priorityPatterns) {
         if (pattern.test(cleanLine) && keyChanges.length < 2) {
           keyChanges.push(cleanLine);
@@ -58,7 +58,7 @@ const SummaryReport: React.FC = () => {
         }
       }
     }
-    
+
     // Second pass: If we don't have enough key changes, take any bullet points
     if (keyChanges.length < 2) {
       for (const line of lines) {
@@ -70,7 +70,7 @@ const SummaryReport: React.FC = () => {
         }
       }
     }
-    
+
     // Third pass: If still not enough, take any substantial line
     if (keyChanges.length < 2) {
       for (const line of lines) {
@@ -80,17 +80,17 @@ const SummaryReport: React.FC = () => {
         }
       }
     }
-    
+
     return keyChanges.slice(0, 2); // Maximum 2 changes per conversion
   };
 
   // Process all reports to extract major changes
   const majorChangesData = useMemo(() => {
     if (reports.length === 0) return [];
-    
+
     // Get up to 5 most recent reports
     const recentReports = reports.slice(0, 5);
-    
+
     return recentReports.map(report => ({
       id: report.id,
       timestamp: report.timestamp,
@@ -116,10 +116,10 @@ const SummaryReport: React.FC = () => {
   }
 
   const totalFiles = reports.reduce((sum, report) => sum + (report.filesCount || 1), 0);
-  const successfulConversions = reports.reduce((sum, report) => 
+  const successfulConversions = reports.reduce((sum, report) =>
     sum + (report.success ? (report.filesCount || 1) : 0), 0
   );
-  const failedConversions = reports.reduce((sum, report) => 
+  const failedConversions = reports.reduce((sum, report) =>
     sum + (report.success ? 0 : (report.filesCount || 1)), 0
   );
 
@@ -137,7 +137,7 @@ const SummaryReport: React.FC = () => {
     },
   };
 
-  const successRate = reportData.totalFiles > 0 
+  const successRate = reportData.totalFiles > 0
     ? ((reportData.successfulConversions / reportData.totalFiles) * 100).toFixed(1)
     : "0.0";
 
@@ -262,7 +262,7 @@ const SummaryReport: React.FC = () => {
                   )}
                 </div>
               ))}
-              
+
               {reports.length > 5 && (
                 <div className="text-center pt-2">
                   <p className="text-sm text-gray-500">
@@ -292,7 +292,7 @@ const SummaryReport: React.FC = () => {
             </div>
             <div>
               <span className="text-gray-600">Version:</span>
-              <span className="ml-2 font-medium">Legacy Code Modernizer v1.0.0</span>
+              <span className="ml-2 font-medium">Code Renew v1.0.0</span>
             </div>
             <div>
               <span className="text-gray-600">Compliance Standards:</span>

@@ -125,19 +125,19 @@ def write_tmp(path, content):
         f.write(content)
 
 
-def clean_ai_response(response: str) -> str:
+def clean_ai_response(response: str, language: str = "python") -> str:
     """
     Clean AI response to remove any markdown formatting that might have slipped through.
-    This ensures we get only raw Python code.
+    This ensures we get only raw code in the specified language.
     """
     if not response:
         return response
     
-    # Remove markdown code blocks (```python, ```, etc.)
+    # Remove markdown code blocks (```python, ```java, ```, etc.)
     import re
     
-    # Pattern to match code blocks: ```python\n...code...\n``` or ```\n...code...\n```
-    code_block_pattern = r'```(?:python)?\s*\n?(.*?)\n?```'
+    # Pattern to match code blocks: ```python\n...code...\n``` or ```java\n...code...\n``` or ```\n...code...\n```
+    code_block_pattern = r'```(?:python|java)?\s*\n?(.*?)\n?```'
     
     # Check if the response is wrapped in code blocks
     match = re.search(code_block_pattern, response, re.DOTALL)
@@ -148,34 +148,51 @@ def clean_ai_response(response: str) -> str:
         # If no code blocks found, just clean up any stray backticks
         cleaned = response.strip()
         # Remove any leading/trailing triple backticks
-        cleaned = re.sub(r'^```(?:python)?\s*\n?', '', cleaned)
+        cleaned = re.sub(r'^```(?:python|java)?\s*\n?', '', cleaned)
         cleaned = re.sub(r'\n?```\s*$', '', cleaned)
     
     # Remove any explanatory text that might appear before the code
-    # Look for patterns like "Here's the converted code:" or similar
     lines = cleaned.split('\n')
     start_idx = 0
     
-    # Skip lines that look like explanatory text until we find actual Python code
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        # If line starts with typical Python keywords/patterns, we found the start
-        if (stripped.startswith(('import ', 'from ', 'def ', 'class ', 'if ', 'for ', 'while ', 
-                                'try:', 'with ', '#', 'print(', 'return ')) or
-            '=' in stripped or stripped.endswith(':')):
-            start_idx = i
-            break
-        # Skip common explanatory phrases
-        if any(phrase in stripped.lower() for phrase in [
-            'here', 'convert', 'moderniz', 'python', 'code', 'result', 'output'
-        ]):
-            continue
-        else:
-            # This looks like actual code, start from here
-            start_idx = i
-            break
+    # Language-specific code start detection
+    if language == "java":
+        java_keywords = ('import ', 'package ', 'public ', 'private ', 'protected ',
+                         'class ', 'interface ', 'abstract ', 'final ', 'static ',
+                         'void ', 'int ', 'String ', 'boolean ', 'double ', 'float ',
+                         '//', '/*', '@', 'enum ')
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(java_keywords) or '=' in stripped or stripped.endswith('{'):
+                start_idx = i
+                break
+            if any(phrase in stripped.lower() for phrase in [
+                'here', 'convert', 'java', 'code', 'result', 'output'
+            ]):
+                continue
+            else:
+                start_idx = i
+                break
+    else:
+        # Python code start detection
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if (stripped.startswith(('import ', 'from ', 'def ', 'class ', 'if ', 'for ', 'while ', 
+                                    'try:', 'with ', '#', 'print(', 'return ')) or
+                '=' in stripped or stripped.endswith(':')):
+                start_idx = i
+                break
+            if any(phrase in stripped.lower() for phrase in [
+                'here', 'convert', 'moderniz', 'python', 'code', 'result', 'output'
+            ]):
+                continue
+            else:
+                start_idx = i
+                break
     
     # Rejoin from the detected start point
     cleaned = '\n'.join(lines[start_idx:]).strip()
@@ -341,6 +358,170 @@ def migrate_code_str(code_str, filename="code.py", model_name=None):
             return code3_improved, explanation, security_issues
         except Exception as e:
             raise RuntimeError(f"Migration failed: {str(e)}")
+
+
+def ai_convert_java_to_python(code, model_name=None):
+    """Convert Java code to idiomatic Python 3 using AI."""
+    if model_name is None:
+        model_name = MODEL_NAME
+    
+    system_prompt = (
+        "You convert Java code into idiomatic Python 3 with type hints. "
+        "CRITICAL: Your response must ONLY contain raw Python code. "
+        "DO NOT include markdown code blocks, backticks, or any formatting. "
+        "DO NOT include explanations, comments, or text before or after the code."
+    )
+    user_prompt = (
+        "Below is Java code. Convert it to idiomatic Python 3 code. "
+        "Use Python best practices: type hints, list comprehensions, context managers, etc. "
+        "Map Java collections to Python equivalents (ArrayList->list, HashMap->dict, etc.). "
+        "Convert Java-style getters/setters to Python properties where appropriate. "
+        "Use snake_case for function/variable names (converted from camelCase). "
+        "Add proper Python docstrings for classes and methods.\n\n"
+        "IMPORTANT: Respond with ONLY the raw Python code. "
+        "DO NOT wrap your response in ```python or ``` or any other markdown formatting. "
+        "DO NOT add any explanatory text before or after the code.\n\n"
+        f"{code}"
+    )
+    try:
+        client = get_groq_client()
+        raw_response = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+        resp = clean_ai_response(raw_response, "python")
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+    
+    compare_prompt = (
+        "Here are two versions of code. The first is Java and the second is the Python 3 conversion. "
+        "Provide a bullet-point list explaining the key changes made during conversion.\n"
+        f"Java Code:\n{code}\nPython Code:\n{resp}"
+    )
+    try:
+        explanation_system_prompt = (
+            "You are a helpful assistant that explains Java to Python conversion changes clearly and concisely. "
+            "When given Java code and its Python equivalent, provide a bullet-point list of key conversion changes. "
+            "Focus on language-specific differences like type system changes, collection mappings, naming conventions, "
+            "OOP pattern differences, and Pythonic idioms applied. "
+            "Provide no more than 10 bullet points. Be specific and technical."
+        )
+        compare = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": explanation_system_prompt},
+                {"role": "user", "content": compare_prompt},
+            ],
+            temperature=0.4
+        )
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+    return (resp, compare)
+
+
+def ai_convert_python_to_java(code, model_name=None):
+    """Convert Python code to idiomatic Java using AI."""
+    if model_name is None:
+        model_name = MODEL_NAME
+    
+    system_prompt = (
+        "You convert Python code into idiomatic Java. "
+        "CRITICAL: Your response must ONLY contain raw Java code. "
+        "DO NOT include markdown code blocks, backticks, or any formatting. "
+        "DO NOT include explanations, comments, or text before or after the code."
+    )
+    user_prompt = (
+        "Below is Python code. Convert it to idiomatic Java code. "
+        "Use Java best practices: proper class structure, access modifiers, strong typing. "
+        "Map Python types to Java equivalents (list->ArrayList, dict->HashMap, tuple->record/class, etc.). "
+        "Convert Python properties to Java getters/setters where appropriate. "
+        "Use camelCase for methods/variables (converted from snake_case). "
+        "Add proper Javadoc comments for classes and methods. "
+        "Include necessary import statements.\n\n"
+        "IMPORTANT: Respond with ONLY the raw Java code. "
+        "DO NOT wrap your response in ```java or ``` or any other markdown formatting. "
+        "DO NOT add any explanatory text before or after the code.\n\n"
+        f"{code}"
+    )
+    try:
+        client = get_groq_client()
+        raw_response = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+        resp = clean_ai_response(raw_response, "java")
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+    
+    compare_prompt = (
+        "Here are two versions of code. The first is Python and the second is the Java conversion. "
+        "Provide a bullet-point list explaining the key changes made during conversion.\n"
+        f"Python Code:\n{code}\nJava Code:\n{resp}"
+    )
+    try:
+        explanation_system_prompt = (
+            "You are a helpful assistant that explains Python to Java conversion changes clearly and concisely. "
+            "When given Python code and its Java equivalent, provide a bullet-point list of key conversion changes. "
+            "Focus on language-specific differences like type system changes, collection mappings, naming conventions, "
+            "OOP pattern differences, and Java-specific patterns applied. "
+            "Provide no more than 10 bullet points. Be specific and technical."
+        )
+        compare = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": explanation_system_prompt},
+                {"role": "user", "content": compare_prompt},
+            ],
+            temperature=0.4
+        )
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+    return (resp, compare)
+
+
+def convert_code_str(code_str, mode, filename="code", model_name=None):
+    """
+    Convert code between languages based on the specified mode.
+    Modes: 'java2py' (Java to Python), 'py2java' (Python to Java)
+    Returns (converted_code, explanation, security_issues)
+    """
+    if not code_str.strip():
+        raise ValueError("Input code is empty")
+    
+    try:
+        code_str.encode('utf-8').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError) as e:
+        raise ValueError(f"Input encoding error: {str(e)}")
+    
+    try:
+        if mode == "java2py":
+            converted_code, explanation = ai_convert_java_to_python(code_str, model_name)
+            # Security check on the output Python code
+            security_issues = ai_security_check(converted_code, filename, model_name, language="python")
+            return converted_code, explanation, security_issues
+        elif mode == "py2java":
+            converted_code, explanation = ai_convert_python_to_java(code_str, model_name)
+            # Security check on the output Java code
+            security_issues = ai_security_check(converted_code, filename, model_name, language="java")
+            return converted_code, explanation, security_issues
+        else:
+            raise ValueError(f"Unsupported conversion mode: {mode}")
+    except Exception as e:
+        raise RuntimeError(f"Conversion failed: {str(e)}")
 
 
 def main():

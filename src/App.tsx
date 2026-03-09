@@ -10,6 +10,8 @@ import CodeWorkspace from "./components/CodeWorkspace";
 import SecurityScanner from "./components/SecurityScanner";
 import SummaryReport from "./components/SummaryReport";
 import Settings from "./components/Settings";
+import CloneConvert from "./components/CloneConvert";
+import RecoveryLoop from "./components/RecoveryLoop";
 import NotFound from "./pages/NotFound";
 import { AppProvider } from "./context/AppContext";
 
@@ -21,18 +23,20 @@ const App = () => (
       <Toaster />
       <Sonner />
       <AppProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="workspace" element={<CodeWorkspace />} />
-            <Route path="security" element={<SecurityScanner />} />
-            <Route path="report" element={<SummaryReport />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="workspace" element={<CodeWorkspace />} />
+              <Route path="security" element={<SecurityScanner />} />
+              <Route path="report" element={<SummaryReport />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="clone-convert" element={<CloneConvert />} />
+              <Route path="recovery" element={<RecoveryLoop />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
       </AppProvider>
     </TooltipProvider>
   </QueryClientProvider>
