@@ -144,7 +144,11 @@ const availableModels: AIModel[] = [
   },
   {
     id: 'mixtral-8x7b-32768',
+<<<<<<< HEAD
+    name: 'Mixtral 8x7B', 
+=======
     name: 'Mixtral 8x7B',
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
     description: 'Great balance of speed and accuracy'
   },
   {
@@ -190,11 +194,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (savedSettings) {
         const settings = JSON.parse(savedSettings);
         const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
+<<<<<<< HEAD
+                       settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' : 
+                       settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
+                       settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
+                       'llama-3.3-70b-versatile';
+        
+=======
           settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
             settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
               settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
                 'llama-3.3-70b-versatile';
 
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
         // Migration: If user had no explicit model selection, default to Llama 3.3 70B
         if (!settings.aiModel) {
           settings.aiModel = 'Llama 3.3 70B';
@@ -315,7 +327,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (response.ok && data.status === 'success') {
         // Mark as user configured and save to localStorage
         localStorage.setItem('legacyCodeModernizer_groqConfigured', 'true');
+<<<<<<< HEAD
+        
+=======
 
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
         // Update state with userConfigured flag and then check connectivity
         setApiConnectivity(prev => ({
           ...prev,
@@ -473,11 +489,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // Convert modelId back to display format for localStorage
       const displayModel = modelId === 'llama-3.3-70b-versatile' ? 'Llama 3.3 70B' :
+<<<<<<< HEAD
+                          modelId === 'llama-3.1-8b-instant' ? 'Llama 3.1 8B' :
+                          modelId === 'mixtral-8x7b-32768' ? 'Mixtral 8x7B' :
+                          modelId === 'gemma2-9b-it' ? 'Gemma 2 9B' :
+                          'Llama 3.3 70B';
+      
+=======
         modelId === 'llama-3.1-8b-instant' ? 'Llama 3.1 8B' :
           modelId === 'mixtral-8x7b-32768' ? 'Mixtral 8x7B' :
             modelId === 'gemma2-9b-it' ? 'Gemma 2 9B' :
               'Llama 3.3 70B';
 
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
       settings.aiModel = displayModel;
       localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(settings));
 
@@ -521,10 +545,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const settings = event.detail;
       if (settings.aiModel) {
         const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
+<<<<<<< HEAD
+                       settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' : 
+                       settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
+                       settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
+                       'llama-3.3-70b-versatile';
+=======
           settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
             settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
               settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
                 'llama-3.3-70b-versatile';
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
         setSelectedModel(modelId);
       }
     };

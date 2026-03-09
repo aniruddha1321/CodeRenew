@@ -311,7 +311,11 @@ const CodeWorkspace: React.FC = () => {
     }
     // Check API connectivity before attempting conversion
     if (!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) {
+<<<<<<< HEAD
+      toast("API not connected", { 
+=======
       toast("API not connected", {
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
         description: "Please configure your Groq API key in Settings first.",
         action: {
           label: "Go to Settings",
@@ -349,7 +353,11 @@ const CodeWorkspace: React.FC = () => {
 
       const startTime = Date.now();
       const modelToUse = selectedModel || 'llama-3.3-70b-versatile';
+<<<<<<< HEAD
+      
+=======
 
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
       try {
         const mode = workspaceState.conversionMode;
         const isJavaMode = mode === 'java2py' || mode === 'py2java';
@@ -1099,7 +1107,11 @@ const CodeWorkspace: React.FC = () => {
                 <div className="flex items-center gap-2 text-yellow-700 text-sm">
                   <AlertCircle size={16} />
                   <span>API not connected. Please configure your Groq API key in Settings.</span>
+<<<<<<< HEAD
+                  <button 
+=======
                   <button
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
                     onClick={() => navigate("/settings")}
                     className="text-blue-600 hover:text-blue-800 underline"
                   >

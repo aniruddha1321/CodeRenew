@@ -1,79 +1,166 @@
-# Code Renew
+# CodeRenew
 
 ## Overview
 
-The **Code Renew** is a desktop application designed to automatically convert legacy Python 2 code to modern, secure, and idiomatic Python 3. It also provides a comprehensive security analysis of the converted code, identifying potential vulnerabilities and suggesting improvements. This tool is ideal for developers looking to modernize their Python projects, improve code quality, and enhance security.
+**CodeRenew** is an AI-powered desktop application for modernizing legacy codebases. It converts Python 2 to Python 3, translates between Java and Python, performs comprehensive security analysis, and includes a **Recovery Loop** agent that continuously monitors customer repositories — automatically detecting issues and creating pull requests with fixes.
 
 ## Features
 
-* **Code Conversion**: Converts Python 2 code to Python 3 with type hints.
-* **Security Analysis**: Identifies security vulnerabilities, bad practices, and compliance risks in the converted code.
-* **AI-Powered**: Leverages the power of AI to provide intelligent code modernization and security auditing.
-* **User-Friendly Interface**: A simple and intuitive desktop application built with Electron and React.
-* **GitHub Integration**: Allows users to import and convert files directly from their GitHub repositories.
+* **Code Conversion** — Python 2 → Python 3 (via `lib2to3` + AI refinement with type hints), Java ↔ Python translation.
+* **GitHub Clone & Convert** — Clone a GitHub repo, bulk-convert all matching files, and push the result to a new branch.
+* **AI Security Scanner** — Scans code for vulnerabilities, bad practices, and compliance risks (HIPAA, ISO 27001, General) with severity ratings and remediation suggestions.
+* **Knowledge Graph** — Generates an interactive dependency/relationship graph of a codebase using AI analysis.
+* **Recovery Loop** — Continuous monitoring agent: customers provide repo access, the agent polls for changes, detects legacy patterns and security issues, auto-generates fixes, and opens pull requests automatically.
+* **Summary Report** — Aggregated dashboard of all conversion and security findings.
+* **Secure Credential Storage** — API keys and GitHub tokens are stored securely via a Rust-based `api_manager` CLI binary.
 
-## Technologies Used
+## Tech Stack
 
-This project is built with a modern tech stack, including:
-
-* **Frontend**:
-    * [Vite](https://vitejs.dev/)
-    * [TypeScript](https://www.typescriptlang.org/)
-    * [React](https://reactjs.org/)
-    * [shadcn-ui](https://ui.shadcn.com/)
-    * [Tailwind CSS](https://tailwindcss.com/)
-* **Backend**:
-    * [Flask](https://flask.palletsprojects.com/)
-    * [Python](https://www.python.org/)
-    * [Groq](https://groq.com/)\n    * [Llama 3.3](https://groq.com/)
-* **Desktop App**:
-    * [Electron](https://www.electronjs.org/)
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | [React](https://reactjs.org/) · [TypeScript](https://www.typescriptlang.org/) · [Vite](https://vitejs.dev/) · [Tailwind CSS](https://tailwindcss.com/) · [shadcn/ui](https://ui.shadcn.com/) · [Recharts](https://recharts.org/) |
+| **Backend** | [Flask](https://flask.palletsprojects.com/) · [Python 3](https://www.python.org/) · [Groq API](https://groq.com/) (Llama 3.3 70B, Llama 3.1 8B, Mixtral 8x7B, Gemma2 9B) |
+| **Desktop** | [Electron](https://www.electronjs.org/) |
+| **Credential Manager** | [Rust](https://www.rust-lang.org/) CLI (`api_manager`) |
+| **Libraries** | lib2to3 · GitPython · NetworkX · Flask-CORS |
 
 ## Getting Started
 
-To get started with the Code Renew, follow these steps:
-
 ### Prerequisites
 
-* Node.js and npm installed. You can use [nvm](https://github.com/nvm-sh/nvm#installing-and-updating) to manage your Node.js versions.
-* Python 3 installed.
-* Rust and Cargo for the `api_manager` CLI tool.
+* **Node.js** (v18+) and npm/bun
+* **Python 3.10+** with pip
+* **Rust & Cargo** (only if rebuilding the `api_manager` binary)
+* A **Groq API key** (free tier available at [console.groq.com](https://console.groq.com))
+* A **GitHub personal access token** (for private repos and PR creation)
 
-### Installation and Running
+### Installation
 
-1.  **Clone the repository:**
+```sh
+# 1. Clone the repository
+git clone https://github.com/kronten28/legacycodemodernizer.git
+cd legacycodemodernizer
 
-    ```sh
-    git clone https://github.com/kronten28/legacycodemodernizer.git
-    ```
+# 2. Install frontend dependencies
+npm install
 
-2.  **Navigate to the project directory:**
+# 3. Install backend dependencies
+pip install -r backend/requirements.txt
 
-    ```sh
-    cd legacycodemodernizer
-    ```
+# 4. Start the backend API server
+cd backend && python api.py &
 
-3.  **Install the necessary dependencies:**
+# 5. Start the desktop app (Electron + Vite)
+cd .. && npm run dev
+```
 
-    ```sh
-    npm install
-    ```
+### Configuration
 
-4.  **Start the development server:**
+On first launch, go to **Settings** in the app and enter your:
+1. **Groq API Key** — enables AI-powered conversion and security scanning.
+2. **GitHub Token** — enables cloning private repos and creating PRs from the Recovery Loop.
 
-    ```sh
-    npm run dev
-    ```
+Keys are stored locally via the `api_manager` binary and never leave your machine.
 
-This will start the Vite development server, build the Electron app, and launch the Code Renew application.
+## Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│              Electron Desktop                │
+│  ┌────────────────────────────────────────┐  │
+│  │   React Frontend (Vite + Tailwind)     │  │
+│  │   ├── Dashboard                        │  │
+│  │   ├── Code Workspace                   │  │
+│  │   ├── Clone & Convert                  │  │
+│  │   ├── Security Scanner                 │  │
+│  │   ├── Recovery Loop                    │  │
+│  │   ├── Knowledge Graph                  │  │
+│  │   ├── Summary Report                   │  │
+│  │   └── Settings                         │  │
+│  └──────────────┬─────────────────────────┘  │
+│                 │ HTTP (localhost:5000)        │
+│  ┌──────────────▼─────────────────────────┐  │
+│  │   Flask Backend                        │  │
+│  │   ├── translate.py     (conversion)    │  │
+│  │   ├── security_check.py (AI scanner)   │  │
+│  │   ├── clone_convert.py  (GitHub ops)   │  │
+│  │   ├── knowledge_graph.py (dep graph)   │  │
+│  │   ├── recovery_loop.py  (monitor agent)│  │
+│  │   └── api_manager/      (Rust creds)   │  │
+│  └──────────────┬─────────────────────────┘  │
+│                 │ Groq API                    │
+│  ┌──────────────▼─────────────────────────┐  │
+│  │   AI Models (Llama 3.3 70B, etc.)      │  │
+│  └────────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
+```
 
 ## How It Works
 
-The Code Renew uses a combination of traditional and AI-powered techniques to modernize your code:
+### Code Conversion
+1. **Initial pass** — `lib2to3` performs mechanical Python 2 → 3 transformations.
+2. **AI refinement** — The Groq-hosted LLM adds type hints, modernizes idioms, and cleans up artifacts.
+3. **Security scan** — The converted code is analyzed for vulnerabilities with severity ratings and fix suggestions.
 
-1.  **Initial Conversion**: The application first uses the `2to3` library to perform an initial conversion of the Python 2 code to Python 3.
-2.  **AI Modernization**: The converted code is then passed to the AI model (GPT-4.1) to add type hints, remove unnecessary comments, and improve the code to make it more idiomatic and robust in Python 3.
-3.  **Security Analysis**: The modernized code is then analyzed for security vulnerabilities, bad practices, and compliance risks using the AI model.
-4.  **Reporting**: The application provides a detailed report of the changes made to the code, as well as any security issues that were found.
+### Recovery Loop
+1. User provides a GitHub repo URL and configures poll interval + auto-fix preference.
+2. The agent clones the repo, builds a file-hash baseline, and runs an initial scan.
+3. A background thread polls for new commits at the configured interval.
+4. On each poll: pulls latest changes, detects modified/new files, runs legacy pattern detection and AI security scanning.
+5. If auto-fix is enabled, the agent generates remediation code via AI and creates a pull request with the fixes.
+6. All activity is streamed to a real-time event log in the frontend.
 
-This multi-step process ensures that your code is not only compatible with Python 3 but also secure, efficient, and easy to maintain.
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| POST | `/migrate` | Convert Python 2 → 3 |
+| POST | `/convert` | Translate Java ↔ Python |
+| POST | `/github/clone` | Clone a GitHub repo |
+| POST | `/github/bulk-convert` | Bulk convert files in a cloned repo |
+| POST | `/github/push-branch` | Push converted files to a new branch |
+| POST | `/analyze/knowledge-graph` | Generate knowledge graph |
+| POST | `/recovery/start` | Start monitoring a repo |
+| POST | `/recovery/stop` | Stop monitoring |
+| GET | `/recovery/status` | Get all monitor statuses |
+| GET | `/recovery/events` | Get agent event log |
+| GET | `/recovery/issues` | Get detailed scan issues |
+| POST | `/recovery/scan` | Trigger an immediate scan |
+
+## Project Structure
+
+```
+├── backend/
+│   ├── api.py               # Flask API server
+│   ├── translate.py          # AI code conversion
+│   ├── security_check.py     # AI security scanner
+│   ├── clone_convert.py      # GitHub repo operations
+│   ├── knowledge_graph.py    # Dependency graph builder
+│   ├── recovery_loop.py      # Continuous monitoring agent
+│   └── api_manager/          # Rust credential manager
+├── src/
+│   ├── components/
+│   │   ├── Dashboard.tsx
+│   │   ├── CodeWorkspace.tsx
+│   │   ├── CloneConvert.tsx
+│   │   ├── SecurityScanner.tsx
+│   │   ├── RecoveryLoop.tsx
+│   │   ├── KnowledgeGraph.tsx
+│   │   ├── SummaryReport.tsx
+│   │   ├── Settings.tsx
+│   │   ├── Sidebar.tsx
+│   │   ├── Layout.tsx
+│   │   └── ui/              # shadcn/ui components
+│   ├── context/
+│   │   └── AppContext.tsx    # Global state
+│   └── App.tsx               # Router
+├── electron/
+│   ├── main.ts
+│   └── preload.ts
+└── package.json
+```
+
+## License
+
+This project is part of an academic submission (8th Semester Final Year Project).

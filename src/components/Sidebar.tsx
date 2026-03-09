@@ -48,8 +48,13 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) => {
     if (!apiConnectivity.userConfigured) {
       return <WifiOff size={12} className="text-gray-400" />;
     }
+<<<<<<< HEAD
+    return (apiConnectivity.isConnected && apiConnectivity.groqConfigured) ? 
+      <Wifi size={12} className="text-green-400" /> : 
+=======
     return (apiConnectivity.isConnected && apiConnectivity.groqConfigured) ?
       <Wifi size={12} className="text-green-400" /> :
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
       <WifiOff size={12} className="text-red-400" />;
   };
 
@@ -147,7 +152,11 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) => {
             Last checked: {formatLastChecked()}
           </div>
         )}
+<<<<<<< HEAD
+        
+=======
 
+>>>>>>> 21b6dea (feat: implement clone and convert functionality)
         {apiConnectivity.userConfigured && (!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
           <button
             onClick={checkApiConnectivity}
