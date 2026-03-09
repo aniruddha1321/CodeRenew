@@ -6,8 +6,12 @@ import json
 # Ensure UTF-8 encoding for subprocess calls
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
+# Build absolute path to api_manager executable based on this script's location
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_API_MANAGER = os.path.join(_SCRIPT_DIR, "api_manager", "target", "release", "api_manager.exe")
+
 def save_api_key(provider: str, api: str):
-    cmd = ["./api_manager/target/release/api_manager.exe", "-s", api, provider]
+    cmd = [_API_MANAGER, "-s", api, provider]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', check=True)
     except subprocess.CalledProcessError as e:
@@ -26,7 +30,7 @@ def save_api_key(provider: str, api: str):
         )
 
 def save_token(provider: str, token: str):
-    cmd = ["./api_manager/target/release/api_manager.exe", "-s", token, provider]
+    cmd = [_API_MANAGER, "-s", token, provider]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', check=True)
     except subprocess.CalledProcessError as e:
@@ -46,7 +50,7 @@ def save_token(provider: str, token: str):
 
 
 def delete_api_key(provider: str):
-    cmd = ["./api_manager/target/release/api_manager.exe", "-d", provider]
+    cmd = [_API_MANAGER, "-d", provider]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', check=True)
     except subprocess.CalledProcessError as e:
@@ -65,7 +69,7 @@ def delete_api_key(provider: str):
         )
 
 def delete_token(provider: str):
-    cmd = ["./api_manager/target/release/api_manager.exe", "-d", provider]
+    cmd = [_API_MANAGER, "-d", provider]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', check=True)
     except subprocess.CalledProcessError as e:

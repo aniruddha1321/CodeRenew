@@ -95,7 +95,7 @@ def test_multiple_conversions():
     return successful > 0
 
 if __name__ == "__main__":
-    print("=== Legacy Code Modernizer API Test ===")
+    print("=== Code Renew API Test ===")
     print(f"Testing against: {BACKEND_URL}")
     
     # Test health first

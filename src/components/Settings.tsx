@@ -5,7 +5,7 @@ import { useAppContext } from '@/context/AppContext';
 
 interface SettingsState {
   aiModel: string;
-  openaiApiKey: string;
+  groqApiKey: string;
   githubToken: string;
   language: string;
   secureMode: boolean;
@@ -16,8 +16,8 @@ interface SettingsState {
 const Settings: React.FC = () => {
   const { apiConnectivity, checkApiConnectivity, saveApiKey, deleteApiKey,gitHubConnectivity, checkGitHubConnectivity, saveGitHubToken, deleteGitHubToken, selectedModel, availableModels, updateSelectedModel } = useAppContext();
   const [settings, setSettings] = useState<SettingsState>({
-    aiModel: 'GPT-4.1',
-    openaiApiKey: '',
+    aiModel: 'Llama 3.3 70B',
+    groqApiKey: '',
     githubToken: '',
     language: 'en',
     secureMode: true,
@@ -52,8 +52,8 @@ const Settings: React.FC = () => {
       // Only cleanup if there's an encoding error detected
       if (apiConnectivity.error && apiConnectivity.error.includes('ascii')) {
         // This suggests the stored key has encoding issues, clear it
-        await deleteApiKey('openai');
-        console.log('Cleaned up corrupted OpenAI API key');
+        await deleteApiKey('groq');
+        console.log('Cleaned up corrupted Groq API key');
       }
     } catch (error) {
       console.log('Error during cleanup, continuing normally:', error);
@@ -75,7 +75,7 @@ const Settings: React.FC = () => {
   // Load existing API key when user configuration or connection status changes
   useEffect(() => {
     loadExistingApiKey();
-  }, [apiConnectivity.userConfigured, apiConnectivity.isConnected, apiConnectivity.openaiConfigured]);
+  }, [apiConnectivity.userConfigured, apiConnectivity.isConnected, apiConnectivity.groqConfigured]);
 
   useEffect(() => {
     loadExistingToken();
@@ -95,13 +95,13 @@ const Settings: React.FC = () => {
         // Clean up corrupted keys if needed
         await cleanupCorruptedKeys();
         
-        if (apiConnectivity.isConnected && apiConnectivity.openaiConfigured) {
+        if (apiConnectivity.isConnected && apiConnectivity.groqConfigured) {
           // We know there's a key, but we don't show it for security reasons
           // Just indicate that there's an existing key
           setHasExistingApiKey(true);
           setSettings(prev => ({ 
             ...prev, 
-            openaiApiKey: '••••••••••••••••••••••••••••••••••••••••••••••••••••' // Masked key
+            groqApiKey: '••••••••••••••••••••••••••••••••••••••••••••••••••••' // Masked key
           }));
         } else {
           setHasExistingApiKey(false);
@@ -155,9 +155,9 @@ const Settings: React.FC = () => {
       if (savedSettings) {
         const parsedSettings = JSON.parse(savedSettings);
         const mergedSettings: SettingsState = {
-        aiModel: parsedSettings.aiModel || 'GPT-4.1',
+        aiModel: parsedSettings.aiModel || 'Llama 3.3 70B',
         // Clean up any masked values that might have been saved previously
-        openaiApiKey: (parsedSettings.openaiApiKey && parsedSettings.openaiApiKey.includes('••••')) ? '' : (parsedSettings.openaiApiKey || ''),
+        groqApiKey: (parsedSettings.groqApiKey && parsedSettings.groqApiKey.includes('••••')) ? '' : (parsedSettings.groqApiKey || ''),
         githubToken: (parsedSettings.githubToken && parsedSettings.githubToken.includes('••••')) ? '' : (parsedSettings.githubToken || ''),
         language: parsedSettings.language || 'en',
         secureMode: parsedSettings.secureMode ?? true,
@@ -187,7 +187,7 @@ const Settings: React.FC = () => {
         ...settings,
         lastSaved: new Date().toISOString(),
         // Remove masked values - they shouldn't be persisted
-        openaiApiKey: hasExistingApiKey ? '' : settings.openaiApiKey,
+        groqApiKey: hasExistingApiKey ? '' : settings.groqApiKey,
         githubToken: hasExistingToken ? '' : settings.githubToken
       };
       
@@ -221,20 +221,21 @@ const Settings: React.FC = () => {
   const handleModelChange = (newModel: string) => {
     setSettings(prev => ({ ...prev, aiModel: newModel }));
     // Convert display model to API model ID and update context
-    const modelId = newModel === 'GPT-4.1' ? 'gpt-4.1' :
-                   newModel === 'GPT-4o' ? 'gpt-4o' :
-                   newModel === 'GPT-3.5 Turbo' ? 'gpt-3.5-turbo' :
-                   'gpt-4.1';
+    const modelId = newModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
+                   newModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
+                   newModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
+                   newModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
+                   'llama-3.3-70b-versatile';
     updateSelectedModel(modelId);
   };
 
   const handleApiKeyChange = (newApiKey: string) => {
     // If user starts typing, clear the masked value and use actual input
-    if (hasExistingApiKey && newApiKey !== settings.openaiApiKey) {
+    if (hasExistingApiKey && newApiKey !== settings.groqApiKey) {
       setHasExistingApiKey(false);
     }
     setActualApiKey(newApiKey);
-    setSettings(prev => ({ ...prev, openaiApiKey: newApiKey }));
+    setSettings(prev => ({ ...prev, groqApiKey: newApiKey }));
   };
 
   const handleTokenChange = (newToken: string) => {
@@ -250,9 +251,9 @@ const Settings: React.FC = () => {
     // If we have an existing key, just test the connection
     if (hasExistingApiKey) {
       await checkApiConnectivity();
-      if (apiConnectivity.isConnected && apiConnectivity.openaiConfigured) {
+      if (apiConnectivity.isConnected && apiConnectivity.groqConfigured) {
         toast("API connection confirmed!", {
-          description: "Successfully connected to OpenAI API using existing key.",
+          description: "Successfully connected to Groq API using existing key.",
           icon: <CheckCircle className="text-green-500" size={16} />
         });
       } else {
@@ -265,10 +266,10 @@ const Settings: React.FC = () => {
     }
 
     // For new API key input
-    const keyToUse = actualApiKey.trim() || settings.openaiApiKey.trim();
+    const keyToUse = actualApiKey.trim() || settings.groqApiKey.trim();
     if (!keyToUse) {
       toast("Please enter an API key", {
-        description: "An OpenAI API key is required to establish connection.",
+        description: "A Groq API key is required to establish connection.",
         icon: <AlertCircle className="text-red-500" size={16} />
       });
       return;
@@ -281,7 +282,7 @@ const Settings: React.FC = () => {
       
       if (success) {
         toast("API connection established!", {
-          description: "Successfully connected to OpenAI API.",
+          description: "Successfully connected to Groq API.",
           icon: <CheckCircle className="text-green-500" size={16} />
         });
         // Reset state for future connections
@@ -289,7 +290,7 @@ const Settings: React.FC = () => {
         setActualApiKey('');
         setSettings(prev => ({ 
           ...prev, 
-          openaiApiKey: '••••••••••••••••••••••••••••••••••••••••••••••••••••'
+          groqApiKey: '••••••••••••••••••••••••••••••••••••••••••••••••••••'
         }));
       } else {
         toast("Failed to establish API connection", {
@@ -373,14 +374,14 @@ const Settings: React.FC = () => {
     setIsClearing(true);
     
     try {
-      const success = await deleteApiKey('openai');
+      const success = await deleteApiKey('groq');
       
       if (success) {
-        setSettings(prev => ({ ...prev, openaiApiKey: '' }));
+        setSettings(prev => ({ ...prev, groqApiKey: '' }));
         setHasExistingApiKey(false);
         setActualApiKey('');
         toast("API key cleared successfully!", {
-          description: "Your OpenAI API key has been removed from storage.",
+          description: "Your Groq API key has been removed from storage.",
           icon: <CheckCircle className="text-green-500" size={16} />
         });
       } else {
@@ -404,7 +405,7 @@ const Settings: React.FC = () => {
     setIsGitClearing(true);
     
     try {
-      const success = await deleteGitHubToken('openai');
+      const success = await deleteGitHubToken('GitHub');
       
       if (success) {
         setSettings(prev => ({ ...prev, githubToken: '' }));
@@ -520,14 +521,14 @@ const Settings: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  OpenAI API Key
+                  Groq API Key
                 </label>
                 <div className="relative">
                   <input
                     type={showApiKey ? "text" : "password"}
-                    value={settings.openaiApiKey}
+                    value={settings.groqApiKey}
                     onChange={(e) => handleApiKeyChange(e.target.value)}
-                    placeholder="Enter your OpenAI API key"
+                    placeholder="Enter your Groq API key"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
@@ -539,7 +540,7 @@ const Settings: React.FC = () => {
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  <em>Used to authenticate and run code conversion through OpenAI. Your key is stored securely.</em>
+                  <em>Used to authenticate and run code conversion through Groq. Your key is stored securely.</em>
                   {hasExistingApiKey && (
                     <span className="block text-blue-600 font-medium mt-1">
                       ✓ API key is configured. Clear the field to enter a new key.
@@ -551,7 +552,7 @@ const Settings: React.FC = () => {
                 <div className="flex items-center gap-2 mt-3">
                   <button
                     onClick={handleConnectApi}
-                    disabled={isConnecting || (!hasExistingApiKey && !settings.openaiApiKey.trim())}
+                    disabled={isConnecting || (!hasExistingApiKey && !settings.groqApiKey.trim())}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   >
                     {isConnecting ? (
@@ -567,7 +568,7 @@ const Settings: React.FC = () => {
                     )}
                   </button>
                   
-                  {(apiConnectivity.isConnected && apiConnectivity.openaiConfigured) && (
+                  {(apiConnectivity.isConnected && apiConnectivity.groqConfigured) && (
                     <button
                       onClick={handleClearApiKey}
                       disabled={isClearing}
@@ -599,13 +600,13 @@ const Settings: React.FC = () => {
                   </div>
                 )}
 
-                {apiConnectivity.isConnected && apiConnectivity.openaiConfigured && (
+                {apiConnectivity.isConnected && apiConnectivity.groqConfigured && (
                   <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
                     <div className="flex items-center gap-2 text-green-700 text-sm">
                       <CheckCircle size={16} />
                       <span className="font-medium">API Connected</span>
                     </div>
-                    <p className="text-green-600 text-sm mt-1">OpenAI API is configured and ready to use.</p>
+                    <p className="text-green-600 text-sm mt-1">Groq API is configured and ready to use.</p>
                   </div>
                 )}
               </div>
@@ -620,7 +621,7 @@ const Settings: React.FC = () => {
                 >
                   {availableModels.map((model) => (
                     <option key={model.id} value={model.name}>
-                      {model.name} {model.name === 'GPT-5' ? '(Flagship)' : model.name === 'GPT-4.1' ? '(Recommended)' : model.name === 'GPT-4o' ? '(Faster)' : '(Budget)'}
+                      {model.name} {model.name === 'Llama 3.3 70B' ? '(Flagship)' : model.name === 'Llama 3.1 8B' ? '(Fast)' : model.name === 'Mixtral 8x7B' ? '(Balanced)' : '(Compact)'}
                     </option>
                   ))}
                 </select>

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { saveAs } from "file-saver";
+import JSZip from "jszip";
 import { toast } from "@/components/ui/sonner";
 import { useAppContext, SecurityIssue } from '@/context/AppContext';
 import { useLocation, useNavigate } from "react-router-dom";
@@ -83,7 +84,7 @@ const CodeWorkspace: React.FC = () => {
   const python3Code = selectedFileName && convertedFiles[selectedFileName]
     ? convertedFiles[selectedFileName]
     : "Converted code will appear here...";
-  
+
   // Get file-specific explanation from workspace state
   const codeChanges = selectedFileName && workspaceState.fileExplanations?.[selectedFileName]
     ? workspaceState.fileExplanations[selectedFileName]
@@ -96,7 +97,7 @@ const CodeWorkspace: React.FC = () => {
   // Get current model display name
   const getCurrentModelName = () => {
     const model = availableModels.find(m => m.id === selectedModel);
-    return model ? model.name : 'GPT-5';
+    return model ? model.name : 'Llama 3.3 70B';
   };
 
   // Update context whenever state changes
@@ -120,7 +121,7 @@ const CodeWorkspace: React.FC = () => {
         githubFiles,
         githubDefaultFile,
       });
-    } 
+    }
     // If there's passed code and no existing files
     else if (passedCode && Object.keys(uploadedFiles).length === 0 && !selectedFileName) {
       const initialFileName = "pasted_code.py";
@@ -134,7 +135,7 @@ const CodeWorkspace: React.FC = () => {
       setSelectedFileName(workspaceState.selectedFileName);
       setIsConverting(workspaceState.isConverting);
       setShowSummary(workspaceState.showSummary);
-      
+
       // Show summary if there's already converted content and explanation
       if (Object.keys(workspaceState.convertedFiles).length > 0 && latestReport?.explanation) {
         setShowSummary(true);
@@ -166,11 +167,11 @@ const CodeWorkspace: React.FC = () => {
 
   const handlePython2CodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newCode = e.target.value;
-    
+
     if (selectedFileName) {
       setUploadedFiles(prev => {
         const updated = { ...prev };
-        
+
         // If the code is empty and this is a generated file (like new_file.py), remove it
         if (!newCode.trim() && selectedFileName === "new_file.py") {
           delete updated[selectedFileName];
@@ -184,7 +185,7 @@ const CodeWorkspace: React.FC = () => {
         } else {
           updated[selectedFileName] = newCode;
         }
-        
+
         return updated;
       });
     } else {
@@ -212,9 +213,53 @@ const CodeWorkspace: React.FC = () => {
 
   const handleDragLeave = () => setDragOver(false);
 
+  const processZipFile = async (file: File) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      let extractedCount = 0;
+      const mode = workspaceState.conversionMode;
+      const validExts = mode === 'java2py' ? ['.java'] : mode === 'py2java' ? ['.py'] : ['.py'];
+
+      const entries = Object.entries(zip.files);
+      for (const [path, zipEntry] of entries) {
+        if (zipEntry.dir) continue;
+        const lowerPath = path.toLowerCase();
+        const isValid = validExts.some(ext => lowerPath.endsWith(ext)) ||
+          lowerPath.endsWith('.py') || lowerPath.endsWith('.java');
+        if (!isValid) continue;
+
+        const content = await zipEntry.async('string');
+        const fileName = path.includes('/') ? path.split('/').pop()! : path;
+        setUploadedFiles(prev => {
+          const merged = { ...prev, [fileName]: content };
+          if (!selectedFileName || Object.keys(prev).length === 0) {
+            setSelectedFileName(fileName);
+          }
+          return merged;
+        });
+        extractedCount++;
+      }
+
+      if (extractedCount > 0) {
+        toast(`Extracted ${extractedCount} file(s)`, { description: `From ${file.name}` });
+      } else {
+        toast('No code files found', { description: 'The zip file did not contain any .py or .java files.' });
+      }
+    } catch (err) {
+      console.error('Failed to process zip file:', err);
+      toast('Failed to extract zip', { description: 'The file may be corrupted or not a valid zip.' });
+    }
+  };
+
   const processFile = (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.py')) {
-      toast('Unsupported file type', { description: 'Only .py files are allowed.' });
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.zip')) {
+      processZipFile(file);
+      return;
+    }
+    if (!name.endsWith('.py') && !name.endsWith('.java')) {
+      toast('Unsupported file type', { description: 'Only .py, .java, and .zip files are allowed.' });
       return;
     }
     const reader = new FileReader();
@@ -238,7 +283,10 @@ const CodeWorkspace: React.FC = () => {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
-    files.filter(f => f.name.endsWith(".py")).forEach(processFile);
+    files.filter(f => {
+      const n = f.name.toLowerCase();
+      return n.endsWith('.py') || n.endsWith('.java') || n.endsWith('.zip');
+    }).forEach(processFile);
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -262,9 +310,9 @@ const CodeWorkspace: React.FC = () => {
       return;
     }
     // Check API connectivity before attempting conversion
-    if (!apiConnectivity.isConnected || !apiConnectivity.openaiConfigured) {
-      toast("API not connected", { 
-        description: "Please configure your OpenAI API key in Settings first.",
+    if (!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) {
+      toast("API not connected", {
+        description: "Please configure your Groq API key in Settings first.",
         action: {
           label: "Go to Settings",
           onClick: () => navigate("/settings")
@@ -285,37 +333,39 @@ const CodeWorkspace: React.FC = () => {
       securityIssues: SecurityIssue[];
       fileName: string;
     }> = [];
-    
+
     const totalFiles = Object.keys(uploadedFiles).length;
     let processedFiles = 0;
-    
+
     for (const [fileName, fileContent] of Object.entries(uploadedFiles)) {
       processedFiles++;
-      
+
       // Update toast progress for multi-file conversions
       if (totalFiles > 1) {
         toast(`Converting file ${processedFiles}/${totalFiles}`, {
           description: `Processing ${fileName}...`,
         });
       }
-      
+
       const startTime = Date.now();
-      const modelToUse = selectedModel || 'gpt-5';
-      
+      const modelToUse = selectedModel || 'llama-3.3-70b-versatile';
+
       try {
-        const res = await axios.post(`${BACKEND_URL}/migrate`, { 
-          code: fileContent,
-          filename: fileName,
-          model: modelToUse
-        });
+        const mode = workspaceState.conversionMode;
+        const isJavaMode = mode === 'java2py' || mode === 'py2java';
+        const endpoint = isJavaMode ? `${BACKEND_URL}/convert` : `${BACKEND_URL}/migrate`;
+        const payload = isJavaMode
+          ? { code: fileContent, filename: fileName, model: modelToUse, mode }
+          : { code: fileContent, filename: fileName, model: modelToUse };
+        const res = await axios.post(endpoint, payload);
         const endTime = Date.now();
-        
+
         newConvertedFiles[fileName] = res.data.result || "";
-        
+
         // Process security issues
         const securityIssues: SecurityIssue[] = res.data.security_issues || [];
         totalSecurityIssues = [...totalSecurityIssues, ...securityIssues];
-        
+
         // Store conversion report for later (with filename for mapping)
         conversionsToReport.push({
           success: true,
@@ -326,20 +376,20 @@ const CodeWorkspace: React.FC = () => {
           securityIssues: securityIssues,
           fileName: fileName // Add filename to track which file this report belongs to
         });
-        
+
         // Add a small delay between file conversions to prevent rate limiting
         if (processedFiles < totalFiles) {
           await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between files
         }
-        
+
         // If there are security issues, show a notification
         if (securityIssues.length > 0) {
           const highSeverityCount = securityIssues.filter(i => i.severity === 'high').length;
-          const message = highSeverityCount > 0 
+          const message = highSeverityCount > 0
             ? `Found ${securityIssues.length} security issues (${highSeverityCount} high severity)`
             : `Found ${securityIssues.length} security issues`;
-            
-          toast(message, { 
+
+          toast(message, {
             description: "Click on Security Scan to view details",
             action: {
               label: "View",
@@ -351,24 +401,24 @@ const CodeWorkspace: React.FC = () => {
         const endTime = Date.now();
         let message = e instanceof Error ? e.message : String(e);
         let isRateLimitError = false;
-        
+
         // Extract more meaningful error message from axios errors
         if (e && typeof e === 'object' && 'response' in e) {
           const axiosError = e as any;
           if (axiosError.response?.data?.message) {
             message = axiosError.response.data.message;
-            
+
             // Check for rate limiting error
-            if (message.toLowerCase().includes('rate limit') || message.includes('429') || 
-                message.toLowerCase().includes('please try again')) {
+            if (message.toLowerCase().includes('rate limit') || message.includes('429') ||
+              message.toLowerCase().includes('please try again')) {
               isRateLimitError = true;
-              
+
               // Show specific rate limit toast
               toast("Rate limit reached", {
-                description: "OpenAI API rate limit exceeded. Please wait before converting more files.",
+                description: "Groq API rate limit exceeded. Please wait before converting more files.",
                 action: {
                   label: "Learn More",
-                  onClick: () => window.open("https://platform.openai.com/docs/guides/rate-limits", "_blank")
+                  onClick: () => window.open("https://console.groq.com/docs/rate-limits", "_blank")
                 }
               });
             }
@@ -377,7 +427,7 @@ const CodeWorkspace: React.FC = () => {
           } else if (axiosError.response?.status === 429) {
             isRateLimitError = true;
             message = "Rate limit exceeded. The AI service is temporarily unavailable due to high usage.";
-            
+
             toast("Rate limit reached", {
               description: "Too many requests. Please wait a moment before trying again.",
               action: {
@@ -391,7 +441,7 @@ const CodeWorkspace: React.FC = () => {
             });
           }
         }
-        
+
         const errorPrefix = isRateLimitError ? "// Rate limit reached - try again later" : "// Error";
         newConvertedFiles[fileName] = `${errorPrefix}: ${message}`;
         conversionsToReport.push({
@@ -403,7 +453,7 @@ const CodeWorkspace: React.FC = () => {
           securityIssues: [],
           fileName: fileName // Add filename to track which file this report belongs to
         });
-        
+
         // Log detailed error for debugging
         console.error(`Conversion error for ${fileName}:`, {
           error: e,
@@ -413,18 +463,18 @@ const CodeWorkspace: React.FC = () => {
         });
       }
     }
-    
+
     // Update converted files and context state immediately
     setConvertedFiles(newConvertedFiles);
     setIsConverting(false);
-    
+
     // Update workspace state immediately to ensure converted code appears
     updateWorkspaceState({
       convertedFiles: newConvertedFiles,
       isConverting: false,
       showSummary: false // Will be set to true after reports are added
     });
-    
+
     // Small delay to add reports and show summary
     setTimeout(() => {
       // Store individual reports in workspace state for file-specific access
@@ -435,7 +485,7 @@ const CodeWorkspace: React.FC = () => {
           fileReportsMap[report.fileName] = report.explanation;
         }
       });
-      
+
       // Update workspace with file-specific explanations
       updateWorkspaceState({
         convertedFiles: newConvertedFiles,
@@ -443,7 +493,7 @@ const CodeWorkspace: React.FC = () => {
         showSummary: true,
         fileExplanations: fileReportsMap // Store file-specific explanations
       });
-      
+
       // For multiple files, add only a single consolidated report with actual file count
       if (conversionsToReport.length > 1) {
         const consolidatedReport = {
@@ -460,16 +510,16 @@ const CodeWorkspace: React.FC = () => {
         // For single file, add the individual report with filesCount = 1
         conversionsToReport.forEach(report => {
           const { fileName, ...reportWithoutFileName } = report;
-          addReport({...reportWithoutFileName, filesCount: 1});
+          addReport({ ...reportWithoutFileName, filesCount: 1 });
         });
       }
-      
+
       setShowSummary(true);
-      
+
       const successCount = Object.keys(newConvertedFiles).filter(
         key => !newConvertedFiles[key].startsWith('// Error:')
       ).length;
-      
+
       toast(`${successCount}/${Object.keys(newConvertedFiles).length} file(s) converted successfully.`);
     }, 100);
   };
@@ -480,8 +530,20 @@ const CodeWorkspace: React.FC = () => {
       toast("No converted code to download.", { description: "Please select a file." });
       return;
     }
-    const filename = selectedFileName.replace(/\.py$/, "_converted.py");
-    saveAs(new Blob([converted], { type: "text/x-python;charset=utf-8" }), filename);
+    const mode = workspaceState.conversionMode;
+    let filename: string;
+    let mimeType: string;
+    if (mode === 'java2py') {
+      filename = selectedFileName.replace(/\.java$/, '_converted.py');
+      mimeType = 'text/x-python;charset=utf-8';
+    } else if (mode === 'py2java') {
+      filename = selectedFileName.replace(/\.py$/, '_converted.java');
+      mimeType = 'text/x-java;charset=utf-8';
+    } else {
+      filename = selectedFileName.replace(/\.py$/, '_converted.py');
+      mimeType = 'text/x-python;charset=utf-8';
+    }
+    saveAs(new Blob([converted], { type: mimeType }), filename);
   };
 
   // Clear workspace state
@@ -508,17 +570,17 @@ const CodeWorkspace: React.FC = () => {
   };
 
   function getGitHubTokenFromSettings(): string | null {
-  const settings = localStorage.getItem('legacyCodeModernizer_settings');
-  if (!settings) return null;
+    const settings = localStorage.getItem('legacyCodeModernizer_settings');
+    if (!settings) return null;
 
-  try {
-    const parsed = JSON.parse(settings);
-    return parsed.githubToken || null;
-  } catch (err) {
-    console.error("Error parsing settings from localStorage:", err);
-    return null;
+    try {
+      const parsed = JSON.parse(settings);
+      return parsed.githubToken || null;
+    } catch (err) {
+      console.error("Error parsing settings from localStorage:", err);
+      return null;
+    }
   }
-}
 
   const fetchGitHubRepo = async () => {
     if (!githubUrl.trim()) {
@@ -539,7 +601,7 @@ const CodeWorkspace: React.FC = () => {
       const buildFileTree = async (path = ""): Promise<GitHubFile[]> => {
         const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
         const headers: Record<string, string> = {};
-        
+
         // Only add authentication if token exists and is valid (GitHub tokens are typically 40+ chars)
         if (token && token.trim().length > 20) {
           try {
@@ -552,9 +614,9 @@ const CodeWorkspace: React.FC = () => {
             console.warn('Token cleaning failed, proceeding without authentication');
           }
         }
-        
+
         const res = await axios.get(url, { headers });
-        
+
         const files: GitHubFile[] = [];
         for (const item of res.data) {
           const file: GitHubFile = {
@@ -570,7 +632,7 @@ const CodeWorkspace: React.FC = () => {
           } else if (item.name.endsWith(".py")) {
             // Fetch content for Python files
             const fileHeaders: Record<string, string> = {};
-            
+
             // Only add authentication if token exists and is valid
             if (token && token.trim().length > 20) {
               try {
@@ -583,7 +645,7 @@ const CodeWorkspace: React.FC = () => {
                 console.warn('Token cleaning failed, proceeding without authentication');
               }
             }
-            
+
             const fileRes = await axios.get(item.url, { headers: fileHeaders });
             file.content = atob(fileRes.data.content);
           }
@@ -599,8 +661,8 @@ const CodeWorkspace: React.FC = () => {
     } catch (error) {
       console.error("Failed to fetch repository:", error);
       setRepoLoadFailed(true);
-      toast("Failed to load repository", { 
-        description: "Please check the URL or authenticate with GitHub" 
+      toast("Failed to load repository", {
+        description: "Please check the URL or authenticate with GitHub"
       });
     } finally {
       setIsLoadingRepo(false);
@@ -682,15 +744,15 @@ const CodeWorkspace: React.FC = () => {
   };
 
   useEffect(() => {
-      const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === "github_token" && event.data?.token) {
-          setAccessToken(event.data.token);
-          fetchRepos(event.data.token);
-        }
-      };
-      window.addEventListener("message", handleMessage);
-      return () => window.removeEventListener("message", handleMessage);
-    }, []);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "github_token" && event.data?.token) {
+        setAccessToken(event.data.token);
+        fetchRepos(event.data.token);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   // Get security issues for a specific file
   const getFileSecurityIssues = (fileName: string): SecurityIssue[] => {
@@ -702,7 +764,7 @@ const CodeWorkspace: React.FC = () => {
   const getFileHighestSeverity = (fileName: string): 'high' | 'medium' | 'low' | null => {
     const issues = getFileSecurityIssues(fileName);
     if (issues.length === 0) return null;
-    
+
     if (issues.some(issue => issue.severity === 'high')) return 'high';
     if (issues.some(issue => issue.severity === 'medium')) return 'medium';
     return 'low';
@@ -744,16 +806,15 @@ const CodeWorkspace: React.FC = () => {
               <div
                 key={fileName}
                 onClick={() => setSelectedFileName(fileName)}
-                className={`p-3 cursor-pointer border-b border-gray-100 hover:bg-gray-50 ${
-                  isActive ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
-                } ${sidebarCollapsed ? 'px-2' : ''}`}
+                className={`p-3 cursor-pointer border-b border-gray-100 hover:bg-gray-50 ${isActive ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                  } ${sidebarCollapsed ? 'px-2' : ''}`}
                 title={sidebarCollapsed ? fileName : ''}
               >
                 <div className="flex items-center gap-2">
                   {/* File icon */}
                   <div className="flex-shrink-0">
-                    <FileCode 
-                      size={16} 
+                    <FileCode
+                      size={16}
                       className={`${fileName.endsWith('.py') ? 'text-blue-600' : 'text-gray-500'}`}
                     />
                   </div>
@@ -772,7 +833,7 @@ const CodeWorkspace: React.FC = () => {
                             Converted
                           </span>
                         )}
-                        
+
                         {/* Security indicators */}
                         {severity && (
                           <div className="flex items-center gap-1">
@@ -807,10 +868,9 @@ const CodeWorkspace: React.FC = () => {
                         <div className="w-2 h-2 bg-green-500 rounded-full" title="Converted" />
                       )}
                       {severity && (
-                        <div className={`w-2 h-2 rounded-full ${
-                          severity === 'high' ? 'bg-red-500' : 
-                          severity === 'medium' ? 'bg-orange-500' : 'bg-yellow-500'
-                        }`} title={`${issuesCount} ${severity} severity issues`} />
+                        <div className={`w-2 h-2 rounded-full ${severity === 'high' ? 'bg-red-500' :
+                            severity === 'medium' ? 'bg-orange-500' : 'bg-yellow-500'
+                          }`} title={`${issuesCount} ${severity} severity issues`} />
                       )}
                     </div>
                   )}
@@ -930,7 +990,7 @@ const CodeWorkspace: React.FC = () => {
 
     try {
       console.log("Attempting GitHub commit with repo:", `${parsed.owner}/${parsed.repo}`);
-      
+
       const response = await axios.post(`${BACKEND_URL}/github/commit`, {
         repo: `${parsed.owner}/${parsed.repo}`,
         message: commitMessage || `Add converted files to ${normalizedFolder}/`,
@@ -939,19 +999,19 @@ const CodeWorkspace: React.FC = () => {
           content: fileContent
         }))
       });
-      
+
       console.log("GitHub commit response:", response.data);
       toast("Successfully pushed to GitHub!");
       setGithubModalOpenPython3(false);
-    
+
     } catch (err: any) {
       console.error("GitHub commit error:", err);
-      
+
       // More specific error handling
       if (err.response) {
         const status = err.response.status;
         const message = err.response.data?.error || err.response.data?.message || "Unknown error";
-        
+
         if (status === 401) {
           toast("Authentication failed", {
             description: "Please update your GitHub Personal Access Token in Settings.",
@@ -997,6 +1057,18 @@ const CodeWorkspace: React.FC = () => {
             <p className="text-sm text-gray-600 mt-1">
               Using {getCurrentModelName()} for code conversion
             </p>
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Mode:</label>
+              <select
+                value={workspaceState.conversionMode}
+                onChange={(e) => updateWorkspaceState({ conversionMode: e.target.value as 'py2to3' | 'java2py' | 'py2java' })}
+                className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="py2to3">Python 2 → Python 3</option>
+                <option value="java2py">Java → Python</option>
+                <option value="py2java">Python → Java</option>
+              </select>
+            </div>
           </div>
           <div className="flex gap-2">
             <button
@@ -1009,23 +1081,25 @@ const CodeWorkspace: React.FC = () => {
             </button>
             <button
               onClick={handleModernize}
-              disabled={isConverting || !apiConnectivity.isConnected || !apiConnectivity.openaiConfigured}
+              disabled={isConverting || !apiConnectivity.isConnected || !apiConnectivity.groqConfigured}
               className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={!apiConnectivity.isConnected || !apiConnectivity.openaiConfigured ? "API not connected. Please configure your OpenAI API key in Settings." : ""}
+              title={!apiConnectivity.isConnected || !apiConnectivity.groqConfigured ? "API not connected. Please configure your Groq API key in Settings." : ""}
             >
               {isConverting ? <RotateCcw size={16} className="animate-spin" /> : <Play size={16} />}
               {isConverting ? (
-                Object.keys(uploadedFiles).length > 1 
-                  ? "Converting files..." 
+                Object.keys(uploadedFiles).length > 1
+                  ? "Converting files..."
                   : "Converting..."
-              ) : "Convert to Python 3"}
+              ) : workspaceState.conversionMode === 'py2to3' ? "Convert to Python 3"
+                : workspaceState.conversionMode === 'java2py' ? "Convert to Python"
+                  : "Convert to Java"}
             </button>
-            {(!apiConnectivity.isConnected || !apiConnectivity.openaiConfigured) && (
+            {(!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
               <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-center gap-2 text-yellow-700 text-sm">
                   <AlertCircle size={16} />
-                  <span>API not connected. Please configure your OpenAI API key in Settings.</span>
-                  <button 
+                  <span>API not connected. Please configure your Groq API key in Settings.</span>
+                  <button
                     onClick={() => navigate("/settings")}
                     className="text-blue-600 hover:text-blue-800 underline"
                   >
@@ -1068,51 +1142,192 @@ const CodeWorkspace: React.FC = () => {
 
           {/* Main Content Area */}
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg shadow-sm border flex flex-col">
-            <div className="p-4 border-b bg-red-50 border-red-200 flex items-center justify-between">
-              <h3 className="font-semibold text-red-800 flex items-center gap-2">
-                <FileText size={16} /> Python 2 (Legacy)
-              </h3>
-              <div className="flex gap-2">
-                <Dialog open={githubModalOpenPython2} onOpenChange={setGithubModalOpenPython2}>
-                  <DialogTrigger asChild>
-                    <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
-                      <Github size={12} /> GitHub
-                    </button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
-                    <DialogHeader>
-                      <DialogTitle>Import from GitHub</DialogTitle>
-                      <DialogDescription>
-                        Enter a GitHub repository URL to browse and select Python files
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-                      <div className="flex gap-2">
-                        <div className="flex-1 relative">
-                          <input
-                            type="text"
-                            placeholder="https://github.com/username/repository"
-                            value={githubUrl}
-                            onChange={(e) => setGithubUrl(e.target.value)}
-                            className="w-full px-3 py-2 border rounded-md text-sm"
-                          />
-                          {githubUrl && (
+            <div className="bg-white rounded-lg shadow-sm border flex flex-col">
+              <div className={`p-4 border-b flex items-center justify-between ${workspaceState.conversionMode === 'py2to3' ? 'bg-red-50 border-red-200' :
+                  workspaceState.conversionMode === 'java2py' ? 'bg-orange-50 border-orange-200' :
+                    'bg-blue-50 border-blue-200'
+                }`}>
+                <h3 className={`font-semibold flex items-center gap-2 ${workspaceState.conversionMode === 'py2to3' ? 'text-red-800' :
+                    workspaceState.conversionMode === 'java2py' ? 'text-orange-800' :
+                      'text-blue-800'
+                  }`}>
+                  <FileText size={16} /> {
+                    workspaceState.conversionMode === 'py2to3' ? 'Python 2 (Legacy)' :
+                      workspaceState.conversionMode === 'java2py' ? 'Java (Source)' :
+                        'Python (Source)'
+                  }
+                </h3>
+                <div className="flex gap-2">
+                  <Dialog open={githubModalOpenPython2} onOpenChange={setGithubModalOpenPython2}>
+                    <DialogTrigger asChild>
+                      <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
+                        <Github size={12} /> GitHub
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
+                      <DialogHeader>
+                        <DialogTitle>Import from GitHub</DialogTitle>
+                        <DialogDescription>
+                          Enter a GitHub repository URL to browse and select files
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+                        <div className="flex gap-2">
+                          <div className="flex-1 relative">
+                            <input
+                              type="text"
+                              placeholder="https://github.com/username/repository"
+                              value={githubUrl}
+                              onChange={(e) => setGithubUrl(e.target.value)}
+                              className="w-full px-3 py-2 border rounded-md text-sm"
+                            />
+                            {githubUrl && (
+                              <button
+                                onClick={() => setGithubUrl("")}
+                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={fetchGitHubRepo}
+                            disabled={isLoadingRepo}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {isLoadingRepo ? <RotateCcw size={16} className="animate-spin" /> : "Load"}
+                          </button>
+                          {repoLoadFailed && (
                             <button
-                              onClick={() => setGithubUrl("")}
-                              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                              onClick={() => {
+                                setRepoLoadFailed(false);
+                                setGithubAuthenticated(null); // Reset auth status to trigger re-check
+                                navigate("/settings")
+                              }}
+                              className="ml-2 px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700"
                             >
-                              <X size={16} />
+                              Authenticate
                             </button>
                           )}
                         </div>
-                        <button
-                          onClick={fetchGitHubRepo}
-                          disabled={isLoadingRepo}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          {isLoadingRepo ? <RotateCcw size={16} className="animate-spin" /> : "Load"}
-                        </button>
+
+                        {githubFileTree.length > 0 && (
+                          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+                            <div className="border rounded-md p-4 flex-1 overflow-y-auto">
+                              <div className="text-sm font-medium mb-2">Repository Structure</div>
+                              {renderFileTree(githubFileTree)}
+                            </div>
+                            <div className="flex justify-between pt-4 border-t">
+                              <DialogClose asChild>
+                                <button className="px-4 py-2 border rounded-md text-sm hover:bg-muted">
+                                  Cancel
+                                </button>
+                              </DialogClose>
+                              <button
+                                onClick={importSelectedFiles}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                              >
+                                Import Selected Files
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                  <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 flex items-center gap-1">
+                    <FolderOpen size={12} /> Upload
+                  </button>
+                  <input ref={fileInputRef} type="file" style={{ display: "none" }} accept=".py,.java,.zip" onChange={handleUpload} multiple />
+                </div>
+              </div>
+              <div className="flex-1 relative">
+                <textarea
+                  ref={leftPanelRef}
+                  value={python2Code}
+                  onChange={handlePython2CodeChange}
+                  onScroll={() => handleScroll("left")}
+                  className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-green-400"
+                  placeholder={workspaceState.conversionMode === 'py2to3' ? 'Paste or upload Python 2 code...' : workspaceState.conversionMode === 'java2py' ? 'Paste or upload Java code...' : 'Paste or upload Python code...'}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                />
+                {dragOver && (
+                  <div className="absolute inset-0 bg-blue-500 bg-opacity-20 border-2 border-dashed border-blue-500 flex items-center justify-center">
+                    <div className="text-blue-700 font-semibold">Drop files here (.py, .java, .zip)</div>
+                  </div>
+                )}
+                <button onClick={() => handleCopy(python2Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
+                  <Copy size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border flex flex-col">
+              <div className={`p-4 border-b flex items-center justify-between ${workspaceState.conversionMode === 'py2to3' ? 'bg-green-50 border-green-200' :
+                  workspaceState.conversionMode === 'java2py' ? 'bg-blue-50 border-blue-200' :
+                    'bg-orange-50 border-orange-200'
+                }`}>
+                <h3 className={`font-semibold flex items-center gap-2 ${workspaceState.conversionMode === 'py2to3' ? 'text-green-800' :
+                    workspaceState.conversionMode === 'java2py' ? 'text-blue-800' :
+                      'text-orange-800'
+                  }`}>
+                  <FileText size={16} /> {
+                    workspaceState.conversionMode === 'py2to3' ? 'Python 3 (Converted)' :
+                      workspaceState.conversionMode === 'java2py' ? 'Python (Converted)' :
+                        'Java (Converted)'
+                  }
+                </h3>
+                <div className="flex gap-2">
+                  <Dialog open={githubModalOpenPython3} onOpenChange={setGithubModalOpenPython3}>
+                    <DialogTrigger asChild>
+                      <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
+                        <Github size={12} /> Commit
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[500px]">
+                      <DialogHeader>
+                        <DialogTitle>Export Converted File to GitHub</DialogTitle>
+                        <DialogDescription> Push the converted code to a repository of your choice. </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Repository (e.g. user/repo)</label>
+                          <input
+                            type="text"
+                            value={repoInput}
+                            onChange={(e) => setRepoInput(e.target.value)}
+                            placeholder="username/repo"
+                            className="w-full px-3 py-2 border rounded-md text-sm"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Target Path in Repo</label>
+                          <input
+                            type="text"
+                            value={targetPath}
+                            onChange={(e) => setTargetPath(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-md text-sm"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Commit Message</label>
+                          <input
+                            type="text"
+                            value={commitMessage}
+                            onChange={(e) => setCommitMessage(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-md text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 mt-6">
+                        <DialogClose asChild>
+
+                        </DialogClose>
                         {repoLoadFailed && (
                           <button
                             onClick={() => {
@@ -1125,157 +1340,36 @@ const CodeWorkspace: React.FC = () => {
                             Authenticate
                           </button>
                         )}
+                        <button
+                          onClick={handlePushToGitHub}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                        >
+                          Push to GitHub
+                        </button>
                       </div>
+                    </DialogContent>
 
-                      {githubFileTree.length > 0 && (
-                        <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-                          <div className="border rounded-md p-4 flex-1 overflow-y-auto">
-                            <div className="text-sm font-medium mb-2">Repository Structure</div>
-                            {renderFileTree(githubFileTree)}
-                          </div>
-                          <div className="flex justify-between pt-4 border-t">
-                            <DialogClose asChild>
-                              <button className="px-4 py-2 border rounded-md text-sm hover:bg-muted">
-                                Cancel
-                              </button>
-                            </DialogClose>
-                            <button
-                              onClick={importSelectedFiles}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
-                            >
-                              Import Selected Files
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </DialogContent>
-                </Dialog>
-                <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 flex items-center gap-1">
-                  <FolderOpen size={12} /> Upload
-                </button>
-                <input ref={fileInputRef} type="file" style={{ display: "none" }} accept=".py" onChange={handleUpload} multiple />
-              </div>
-            </div>
-            <div className="flex-1 relative">
-              <textarea
-                ref={leftPanelRef}
-                value={python2Code}
-                onChange={handlePython2CodeChange}
-                onScroll={() => handleScroll("left")}
-                className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-green-400"
-                placeholder="Paste or upload Python 2 code..."
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              />
-              {dragOver && (
-                <div className="absolute inset-0 bg-blue-500 bg-opacity-20 border-2 border-dashed border-blue-500 flex items-center justify-center">
-                  <div className="text-blue-700 font-semibold">Drop Python files here</div>
-                </div>
-              )}
-              <button onClick={() => handleCopy(python2Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
-                <Copy size={14} />
-              </button>
-            </div>
-          </div>
+                  </Dialog>
 
-          <div className="bg-white rounded-lg shadow-sm border flex flex-col">
-            <div className="p-4 border-b bg-green-50 border-green-200 flex items-center justify-between">
-              <h3 className="font-semibold text-green-800 flex items-center gap-2">
-                <FileText size={16} /> Python 3 (Converted)
-              </h3>
-              <div className="flex gap-2"> 
-                <Dialog open={githubModalOpenPython3} onOpenChange={setGithubModalOpenPython3}>
-                  <DialogTrigger asChild>
-                    <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
-                      <Github size={12} /> Commit
-                    </button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[500px]">
-                    <DialogHeader>
-                      <DialogTitle>Export Converted File to GitHub</DialogTitle>
-                      <DialogDescription> Push the converted code to a repository of your choice. </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Repository (e.g. user/repo)</label>
-                        <input
-                          type="text"
-                          value={repoInput}
-                          onChange={(e) => setRepoInput(e.target.value)}
-                          placeholder="username/repo"
-                          className="w-full px-3 py-2 border rounded-md text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Target Path in Repo</label>
-                        <input
-                          type="text"
-                          value={targetPath}
-                          onChange={(e) => setTargetPath(e.target.value)}
-                          className="w-full px-3 py-2 border rounded-md text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Commit Message</label>
-                        <input
-                          type="text"
-                          value={commitMessage}
-                          onChange={(e) => setCommitMessage(e.target.value)}
-                          className="w-full px-3 py-2 border rounded-md text-sm"
-                        />
-                      </div>
-                </div>
-
-                <div className="flex justify-end gap-2 mt-6">
-                  <DialogClose asChild>
-                    
-                  </DialogClose>
-                  {repoLoadFailed && (
-                          <button
-                            onClick={() => {
-                              setRepoLoadFailed(false);
-                              setGithubAuthenticated(null); // Reset auth status to trigger re-check
-                              navigate("/settings")
-                            }}
-                            className="ml-2 px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700"
-                          >
-                            Authenticate
-                          </button>
-                        )}
-                  <button
-                    onClick={handlePushToGitHub}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
-                  >
-                    Push to GitHub
+                  <button onClick={handleDownload} className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 flex items-center gap-1">
+                    <Download size={12} /> Download
                   </button>
-                  </div>
-                </DialogContent>
-
-                </Dialog>
-              
-              <button onClick={handleDownload} className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 flex items-center gap-1">
-                <Download size={12} /> Download
-              </button>
+                </div>
+              </div>
+              <div className="flex-1 relative">
+                <textarea
+                  ref={rightPanelRef}
+                  value={python3Code}
+                  readOnly
+                  onScroll={() => handleScroll("right")}
+                  className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-blue-400"
+                  placeholder="Converted code will appear here..."
+                />
+                <button onClick={() => handleCopy(python3Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
+                  <Copy size={14} />
+                </button>
               </div>
             </div>
-            <div className="flex-1 relative">
-              <textarea
-                ref={rightPanelRef}
-                value={python3Code}
-                readOnly
-                onScroll={() => handleScroll("right")}
-                className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-blue-400"
-                placeholder="Converted code will appear here..."
-              />
-              <button onClick={() => handleCopy(python3Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
-                <Copy size={14} />
-              </button>
-            </div>
-          </div>
           </div>
         </div>
 
@@ -1312,13 +1406,13 @@ const CodeWorkspace: React.FC = () => {
                         let processed = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
                         // Replace `code` with inline code
                         processed = processed.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-gray-100 text-gray-800 rounded text-xs font-mono">$1</code>');
-                        
+
                         return <span dangerouslySetInnerHTML={{ __html: processed }} />;
                       };
 
                       lines.forEach((line, index) => {
                         const trimmedLine = line.trim();
-                        
+
                         // Check if it's a header (ends with ** and starts with **)
                         if (trimmedLine.startsWith('**') && trimmedLine.endsWith('**') && trimmedLine.match(/\*\*/g)?.length === 2) {
                           // Save previous section if exists
@@ -1343,7 +1437,7 @@ const CodeWorkspace: React.FC = () => {
                               </div>
                             );
                           }
-                          
+
                           // Start new section
                           const headerText = trimmedLine.replace(/\*\*/g, '').trim();
                           currentSection = { header: headerText, items: [] };
@@ -1351,7 +1445,7 @@ const CodeWorkspace: React.FC = () => {
                         // Check if it's a main bullet point (starts with * or -)
                         else if (trimmedLine.startsWith('*') || trimmedLine.startsWith('-')) {
                           const content = trimmedLine.substring(1).trim();
-                          
+
                           // If we're in a section, add as sub-item
                           if (currentSection) {
                             currentSection.items.push(content);
@@ -1398,7 +1492,7 @@ const CodeWorkspace: React.FC = () => {
                             );
                             currentSection = null;
                           }
-                          
+
                           // Add as regular paragraph
                           processedContent.push(
                             <p key={`para-${index}`} className="text-sm text-gray-600 leading-relaxed">
@@ -1435,7 +1529,7 @@ const CodeWorkspace: React.FC = () => {
                     })()}
                   </div>
                 </div>
-                
+
                 {/* Success indicator */}
                 <div className="mt-6 flex items-center gap-2 text-green-600 bg-green-50 px-4 py-3 rounded-lg">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -143,7 +143,7 @@ const Dashboard: React.FC = () => {
         <h2 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h2>
 
         {/* API Connectivity Banner */}
-        {(!apiConnectivity.isConnected || !apiConnectivity.openaiConfigured) && (
+        {(!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
           <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -151,7 +151,7 @@ const Dashboard: React.FC = () => {
                 <div>
                   <h3 className="font-semibold text-orange-800">API Connection Required</h3>
                   <p className="text-sm text-orange-700">
-                    Configure your OpenAI API key to start converting Python 2 code to Python 3.
+                    Configure your Groq API key to start converting Python 2 code to Python 3.
                   </p>
                 </div>
               </div>

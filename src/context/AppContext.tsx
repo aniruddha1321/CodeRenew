@@ -33,7 +33,7 @@ export interface ApiConnectivity {
   isChecking: boolean;
   lastChecked: Date | null;
   error: string | null;
-  openaiConfigured: boolean;
+  groqConfigured: boolean;
   userConfigured: boolean; // Track if user has explicitly configured the API through Settings
 }
 
@@ -56,6 +56,7 @@ export interface WorkspaceState {
   isConverting: boolean;
   showSummary: boolean;
   fileExplanations?: Record<string, string>; // Store file-specific explanations
+  conversionMode: 'py2to3' | 'java2py' | 'py2java';
 }
 
 // Define available AI models
@@ -70,7 +71,7 @@ interface AppContextType {
   reports: Report[];
   addReport: (report: Omit<Report, 'id' | 'timestamp'>) => void;
   latestReport: Report | null;
-  
+
   // API connectivity management
   apiConnectivity: ApiConnectivity;
   checkApiConnectivity: () => Promise<void>;
@@ -81,7 +82,7 @@ interface AppContextType {
   checkGitHubConnectivity: () => Promise<void>;
   saveGitHubToken: (token: string) => Promise<boolean>;
   deleteGitHubToken: (provider: string) => Promise<boolean>;
-  
+
   // Workspace state management
   workspaceState: WorkspaceState;
   updateWorkspaceState: (updates: Partial<WorkspaceState>) => void;
@@ -102,7 +103,7 @@ const initialApiConnectivity: ApiConnectivity = {
   isChecking: false,
   lastChecked: null,
   error: null,
-  openaiConfigured: false,
+  groqConfigured: false,
   userConfigured: false,
 };
 
@@ -126,29 +127,30 @@ const initialWorkspaceState: WorkspaceState = {
   isConverting: false,
   showSummary: false,
   fileExplanations: {},
+  conversionMode: 'py2to3',
 };
 
 // Available AI models
 const availableModels: AIModel[] = [
   {
-    id: 'gpt-5',
-    name: 'GPT-5',
-    description: 'Latest and most advanced model with superior reasoning (New!)'
+    id: 'llama-3.3-70b-versatile',
+    name: 'Llama 3.3 70B',
+    description: 'Most capable Groq model with excellent reasoning'
   },
   {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1',
-    description: 'Highly accurate for code conversion and security scanning'
+    id: 'llama-3.1-8b-instant',
+    name: 'Llama 3.1 8B',
+    description: 'Fast and efficient for quick code tasks'
   },
   {
-    id: 'gpt-4o',
-    name: 'GPT-4o', 
-    description: 'Faster response times with good accuracy'
+    id: 'mixtral-8x7b-32768',
+    name: 'Mixtral 8x7B',
+    description: 'Great balance of speed and accuracy'
   },
   {
-    id: 'gpt-3.5-turbo',
-    name: 'GPT-3.5 Turbo',
-    description: 'Most cost-effective option'
+    id: 'gemma2-9b-it',
+    name: 'Gemma 2 9B',
+    description: 'Compact model with good code understanding'
   }
 ];
 
@@ -158,7 +160,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [apiConnectivity, setApiConnectivity] = useState<ApiConnectivity>(() => {
     // Load userConfigured state from localStorage on initialization
     try {
-      const savedUserConfigured = localStorage.getItem('legacyCodeModernizer_openaiConfigured');
+      const savedUserConfigured = localStorage.getItem('legacyCodeModernizer_groqConfigured');
       return {
         ...initialApiConnectivity,
         userConfigured: savedUserConfigured === 'true'
@@ -187,33 +189,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const savedSettings = localStorage.getItem('legacyCodeModernizer_settings');
       if (savedSettings) {
         const settings = JSON.parse(savedSettings);
-        const modelId = settings.aiModel === 'GPT-5' ? 'gpt-5' :
-                       settings.aiModel === 'GPT-4.1' ? 'gpt-4.1' : 
-                       settings.aiModel === 'GPT-4o' ? 'gpt-4o' :
-                       settings.aiModel === 'GPT-3.5 Turbo' ? 'gpt-3.5-turbo' :
-                       'gpt-5';
-        
-        // Migration: If user had no explicit model selection, default to GPT-5
+        const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
+          settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
+            settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
+              settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
+                'llama-3.3-70b-versatile';
+
+        // Migration: If user had no explicit model selection, default to Llama 3.3 70B
         if (!settings.aiModel) {
-          settings.aiModel = 'GPT-5';
+          settings.aiModel = 'Llama 3.3 70B';
           localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(settings));
-          return 'gpt-5';
+          return 'llama-3.3-70b-versatile';
         }
-        
+
         return modelId;
       } else {
-        // No saved settings at all, initialize with GPT-5
-        const defaultSettings = { aiModel: 'GPT-5' };
+        // No saved settings at all, initialize with Llama 3.3 70B
+        const defaultSettings = { aiModel: 'Llama 3.3 70B' };
         localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(defaultSettings));
-        return 'gpt-5';
+        return 'llama-3.3-70b-versatile';
       }
     } catch (error) {
       console.error('Error loading model from settings:', error);
-      // On error, also initialize with GPT-5
-      const defaultSettings = { aiModel: 'GPT-5' };
+      // On error, also initialize with Llama 3.3 70B
+      const defaultSettings = { aiModel: 'Llama 3.3 70B' };
       localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(defaultSettings));
     }
-    return 'gpt-5'; // Default to latest model
+    return 'llama-3.3-70b-versatile'; // Default to latest model
   });
 
   const addReport = (reportData: Omit<Report, 'id' | 'timestamp'>) => {
@@ -227,20 +229,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const checkApiConnectivity = useCallback(async (): Promise<void> => {
     setApiConnectivity(prev => ({ ...prev, isChecking: true, error: null }));
-    
+
     try {
       const response = await fetch('http://localhost:5000/api/health');
       const data = await response.json();
-      
+
       if (response.ok) {
-        
+
         setApiConnectivity(prev => ({
           ...prev,
           isConnected: true,
           isChecking: false,
           lastChecked: new Date(),
           error: null,
-          openaiConfigured: data.openai_configured || false,
+          groqConfigured: data.openai_configured || false,
           // Keep userConfigured as is, don't modify it based on backend state
           userConfigured: prev.userConfigured,
         }));
@@ -254,7 +256,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isChecking: false,
         lastChecked: new Date(),
         error: error instanceof Error ? error.message : 'Connection failed',
-        openaiConfigured: false,
+        groqConfigured: false,
         userConfigured: false,
       }));
     }
@@ -263,11 +265,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const checkGitHubConnectivity = useCallback(async (): Promise<void> => {
     setgitHubConnectivity(prev => ({ ...prev, isChecking: true, error: null }));
-    
+
     try {
       const response = await fetch('http://localhost:5000/api/github/health');
       const data = await response.json();
-      
+
       if (response.ok) {
         setgitHubConnectivity(prev => ({
           ...prev,
@@ -303,25 +305,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          provider: 'openai',
+          provider: 'groq',
           api: apiKey,
         }),
       });
 
       const data = await response.json();
-      
+
       if (response.ok && data.status === 'success') {
         // Mark as user configured and save to localStorage
-        localStorage.setItem('legacyCodeModernizer_openaiConfigured', 'true');
-        
+        localStorage.setItem('legacyCodeModernizer_groqConfigured', 'true');
+
         // Update state with userConfigured flag and then check connectivity
         setApiConnectivity(prev => ({
           ...prev,
           userConfigured: true,
           isConnected: true, // Assume connected since API save succeeded
-          openaiConfigured: true // Assume configured since we just saved a key
+          groqConfigured: true // Assume configured since we just saved a key
         }));
-        
+
         // Still check connectivity to get accurate server state
         await checkApiConnectivity();
         return true;
@@ -351,11 +353,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
 
       const data = await response.json();
-      
+
       if (response.ok && data.status === 'success') {
         // Mark as user configured and save to localStorage
         localStorage.setItem('legacyCodeModernizer_githubConfigured', 'true');
-        
+
         // Update state with userConfigured flag and then check connectivity
         setgitHubConnectivity(prev => ({
           ...prev,
@@ -363,7 +365,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           isConnected: true, // Assume connected since API save succeeded
           githubConfigured: true // Assume configured since we just saved a key
         }));
-        
+
         // Still check connectivity to get accurate server state
         await checkGitHubConnectivity();
         return true;
@@ -392,14 +394,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
 
       const data = await response.json();
-      
+
       if (response.ok && data.status === 'success') {
         // After deleting API key, update connectivity state and clear localStorage
-        localStorage.setItem('legacyCodeModernizer_openaiConfigured', 'false');
+        localStorage.setItem('legacyCodeModernizer_groqConfigured', 'false');
         setApiConnectivity(prev => ({
           ...prev,
           isConnected: false,
-          openaiConfigured: false,
+          groqConfigured: false,
           userConfigured: false,
           error: null,
         }));
@@ -430,7 +432,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
 
       const data = await response.json();
-      
+
       if (response.ok && data.status === 'success') {
         // After deleting GitHub token, update connectivity state and clear localStorage
         localStorage.setItem('legacyCodeModernizer_githubConfigured', 'false');
@@ -468,17 +470,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const savedSettings = localStorage.getItem('legacyCodeModernizer_settings');
       let settings = savedSettings ? JSON.parse(savedSettings) : {};
-      
+
       // Convert modelId back to display format for localStorage
-      const displayModel = modelId === 'gpt-5' ? 'GPT-5' :
-                          modelId === 'gpt-4.1' ? 'GPT-4.1' :
-                          modelId === 'gpt-4o' ? 'GPT-4o' :
-                          modelId === 'gpt-3.5-turbo' ? 'GPT-3.5 Turbo' :
-                          'GPT-5';
-      
+      const displayModel = modelId === 'llama-3.3-70b-versatile' ? 'Llama 3.3 70B' :
+        modelId === 'llama-3.1-8b-instant' ? 'Llama 3.1 8B' :
+          modelId === 'mixtral-8x7b-32768' ? 'Mixtral 8x7B' :
+            modelId === 'gemma2-9b-it' ? 'Gemma 2 9B' :
+              'Llama 3.3 70B';
+
       settings.aiModel = displayModel;
       localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(settings));
-      
+
       // Dispatch event to notify other components
       window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
     } catch (error) {
@@ -492,12 +494,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     const initializeApiStatus = async () => {
       // Get the initial userConfigured state from localStorage
-      const savedUserConfigured = localStorage.getItem('legacyCodeModernizer_openaiConfigured');
+      const savedUserConfigured = localStorage.getItem('legacyCodeModernizer_groqConfigured');
       if (savedUserConfigured === 'true') {
         await checkApiConnectivity();
       }
     };
-    
+
     initializeApiStatus();
   }, [checkApiConnectivity]); // Only run once on mount
 
@@ -509,7 +511,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await checkGitHubConnectivity();
       }
     };
-    
+
     initializeGitStatus();
   }, [checkGitHubConnectivity]); // Only run once on mount
 
@@ -518,26 +520,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const handleSettingsUpdate = (event: CustomEvent) => {
       const settings = event.detail;
       if (settings.aiModel) {
-        const modelId = settings.aiModel === 'GPT-5' ? 'gpt-5' :
-                       settings.aiModel === 'GPT-4.1' ? 'gpt-4.1' : 
-                       settings.aiModel === 'GPT-4o' ? 'gpt-4o' :
-                       settings.aiModel === 'GPT-3.5 Turbo' ? 'gpt-3.5-turbo' :
-                       'gpt-5';
+        const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
+          settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
+            settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
+              settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
+                'llama-3.3-70b-versatile';
         setSelectedModel(modelId);
       }
     };
 
     window.addEventListener('settingsUpdated', handleSettingsUpdate as EventListener);
-    
+
     return () => {
       window.removeEventListener('settingsUpdated', handleSettingsUpdate as EventListener);
     };
   }, []);
 
   return (
-    <AppContext.Provider value={{ 
-      reports, 
-      addReport, 
+    <AppContext.Provider value={{
+      reports,
+      addReport,
       latestReport,
       apiConnectivity,
       checkApiConnectivity,

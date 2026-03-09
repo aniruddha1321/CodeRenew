@@ -1,8 +1,8 @@
-# Legacy Code Modernizer
+# Code Renew
 
 ## Overview
 
-The **Legacy Code Modernizer** is a desktop application designed to automatically convert legacy Python 2 code to modern, secure, and idiomatic Python 3. It also provides a comprehensive security analysis of the converted code, identifying potential vulnerabilities and suggesting improvements. This tool is ideal for developers looking to modernize their Python projects, improve code quality, and enhance security.
+The **Code Renew** is a desktop application designed to automatically convert legacy Python 2 code to modern, secure, and idiomatic Python 3. It also provides a comprehensive security analysis of the converted code, identifying potential vulnerabilities and suggesting improvements. This tool is ideal for developers looking to modernize their Python projects, improve code quality, and enhance security.
 
 ## Features
 
@@ -25,13 +25,13 @@ This project is built with a modern tech stack, including:
 * **Backend**:
     * [Flask](https://flask.palletsprojects.com/)
     * [Python](https://www.python.org/)
-    * [OpenAI GPT-4.1](https://openai.com/gpt-4/)
+    * [Groq](https://groq.com/)\n    * [Llama 3.3](https://groq.com/)
 * **Desktop App**:
     * [Electron](https://www.electronjs.org/)
 
 ## Getting Started
 
-To get started with the Legacy Code Modernizer, follow these steps:
+To get started with the Code Renew, follow these steps:
 
 ### Prerequisites
 
@@ -65,11 +65,11 @@ To get started with the Legacy Code Modernizer, follow these steps:
     npm run dev
     ```
 
-This will start the Vite development server, build the Electron app, and launch the Legacy Code Modernizer application.
+This will start the Vite development server, build the Electron app, and launch the Code Renew application.
 
 ## How It Works
 
-The Legacy Code Modernizer uses a combination of traditional and AI-powered techniques to modernize your code:
+The Code Renew uses a combination of traditional and AI-powered techniques to modernize your code:
 
 1.  **Initial Conversion**: The application first uses the `2to3` library to perform an initial conversion of the Python 2 code to Python 3.
 2.  **AI Modernization**: The converted code is then passed to the AI model (GPT-4.1) to add type hints, remove unnecessary comments, and improve the code to make it more idiomatic and robust in Python 3.
