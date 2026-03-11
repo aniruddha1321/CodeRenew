@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Download, FileText, CheckCircle, AlertTriangle, Clock, FileCode, ChevronRight } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
+import { exportReportsCsv, exportReportsPdf } from '@/lib/exportUtils';
 
 const SummaryReport: React.FC = () => {
   const { reports } = useAppContext();
@@ -148,6 +149,20 @@ const SummaryReport: React.FC = () => {
           <div className="flex items-center gap-3">
             <FileText className="text-blue-600" size={28} />
             <h2 className="text-3xl font-bold text-gray-900">Conversion Summary</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportReportsCsv(reports)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+            >
+              <Download size={14} /> CSV
+            </button>
+            <button
+              onClick={() => exportReportsPdf(reports)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Download size={14} /> PDF
+            </button>
           </div>
         </div>
 
