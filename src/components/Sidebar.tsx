@@ -48,13 +48,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) => {
     if (!apiConnectivity.userConfigured) {
       return <WifiOff size={12} className="text-gray-400" />;
     }
-<<<<<<< HEAD
-    return (apiConnectivity.isConnected && apiConnectivity.groqConfigured) ? 
-      <Wifi size={12} className="text-green-400" /> : 
-=======
     return (apiConnectivity.isConnected && apiConnectivity.groqConfigured) ?
       <Wifi size={12} className="text-green-400" /> :
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
       <WifiOff size={12} className="text-red-400" />;
   };
 
@@ -103,9 +98,11 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) => {
 
   return (
     <div className="w-64 bg-slate-900 text-white h-screen flex flex-col">
-      <div className="p-6 border-b border-slate-700">
-        <h1 className="text-xl font-bold text-blue-400">Code Renew</h1>
-        <p className="text-sm text-slate-400 mt-1">Multi-Language Code Converter</p>
+      <div className="px-5 py-4 border-b border-slate-700">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-md bg-blue-500 flex items-center justify-center text-base font-bold text-white">CR</div>
+          <span className="text-2xl font-bold text-slate-100 tracking-wider">CodeRenew</span>
+        </div>
       </div>
 
       <nav className="flex-1 p-4 space-y-2">
@@ -152,11 +149,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) => {
             Last checked: {formatLastChecked()}
           </div>
         )}
-<<<<<<< HEAD
-        
-=======
 
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
         {apiConnectivity.userConfigured && (!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
           <button
             onClick={checkApiConnectivity}

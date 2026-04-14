@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
+import ChatBot from "./ChatBot";
 
 const Layout = () => {
   const [activeView, setActiveView] = useState("dashboard");
@@ -18,6 +19,7 @@ const Layout = () => {
       <div className="flex-1 overflow-auto">
         <Outlet />
       </div>
+      <ChatBot />
     </div>
   );
 };

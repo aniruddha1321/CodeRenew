@@ -164,3 +164,53 @@ Keys are stored locally via the `api_manager` binary and never leave your machin
 ## License
 
 This project is part of an academic submission (8th Semester Final Year Project).
+
+## Quality Gates
+
+Run these commands before submission:
+
+```sh
+npm run lint
+npm run test
+npm run build:web
+```
+
+### Test Coverage Scope
+
+Current automated checks focus on high-signal paths:
+
+* Frontend utility behavior (`cn` class merge logic)
+* Backend endpoint contract checks for:
+	* `/api/health`
+	* `/convert` bad input and invalid mode handling
+	* `/migrate` bad input handling
+
+## CI Pipeline
+
+A GitHub Actions workflow is included at `.github/workflows/ci.yml`.
+
+On each push and pull request to `main` or `master`, the pipeline runs:
+
+1. Dependency installation (Node + Python)
+2. Lint (`npm run lint`)
+3. Frontend tests (`npm run test:frontend`)
+4. Backend smoke tests (`npm run test:backend`)
+5. Frontend production build (`npm run build:web`)
+
+## Requirement Traceability (Submission Quick View)
+
+| Requirement Area | Implementation Evidence |
+|------------------|-------------------------|
+| Legacy code modernization | `/migrate`, `/convert` endpoints in `backend/api.py` |
+| Multi-file / repository processing | `/github/clone`, `/github/bulk-convert`, `/github/push-branch` in `backend/api.py` |
+| Security assessment | `backend/security_check.py`, Security Scanner UI module |
+| Continuous monitoring agent | `backend/recovery_loop.py`, `/recovery/*` endpoints |
+| Knowledge graph analysis | `backend/knowledge_graph.py`, `/analyze/knowledge-graph` |
+| Desktop productization | Electron entrypoints in `electron/main.ts`, `dist-electron/main.cjs` |
+| Verification and reliability | Test files in `src/lib/utils.test.ts` and `backend/tests/test_api_smoke.py`, CI in `.github/workflows/ci.yml` |
+
+## Known Limitations
+
+* AI output quality depends on prompt/model behavior and may vary by language complexity.
+* Security findings are AI-assisted and should be validated in code review.
+* Current automated tests are intentionally compact for fast iteration and should be expanded for full release QA.

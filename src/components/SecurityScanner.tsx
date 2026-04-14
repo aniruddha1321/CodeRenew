@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Shield, AlertTriangle, CheckCircle, Filter, Info } from 'lucide-react';
+import { Shield, AlertTriangle, CheckCircle, Filter, Info, Download } from 'lucide-react';
 import { useAppContext, SecurityIssue } from '@/context/AppContext';
+import { exportSecurityIssuesCsv, exportSecurityIssuesPdf } from '@/lib/exportUtils';
 
 const SecurityScanner: React.FC = () => {
   const [selectedFilter, setSelectedFilter] = useState('all');
@@ -63,6 +64,22 @@ const SecurityScanner: React.FC = () => {
               <option value="iso27001">ISO 27001 Only</option>
               <option value="general">General Security</option>
             </select>
+            {securityIssues.length > 0 && (
+              <>
+                <button
+                  onClick={() => exportSecurityIssuesCsv(filteredIssues)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+                >
+                  <Download size={14} /> CSV
+                </button>
+                <button
+                  onClick={() => exportSecurityIssuesPdf(filteredIssues)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Download size={14} /> PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
 

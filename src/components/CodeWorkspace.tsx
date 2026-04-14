@@ -5,6 +5,8 @@ import {
   RotateCcw,
   FileText,
   FolderOpen,
+  FolderInput,
+  History,
   X,
   Play,
   Github,
@@ -22,7 +24,7 @@ import axios from "axios";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
 import { toast } from "@/components/ui/sonner";
-import { useAppContext, SecurityIssue } from '@/context/AppContext';
+import { useAppContext, SecurityIssue, WorkspaceState } from '@/context/AppContext';
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Dialog,
@@ -45,7 +47,7 @@ interface GitHubFile {
 }
 
 const CodeWorkspace: React.FC = () => {
-  const BACKEND_URL = "http://localhost:5000";
+  const BACKEND_URL = "http://127.0.0.1:5000";
   const [dragOver, setDragOver] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -79,6 +81,27 @@ const CodeWorkspace: React.FC = () => {
 
   // File sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Folder import state
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  const [folderPath, setFolderPath] = useState("");
+  const [isLoadingFolder, setIsLoadingFolder] = useState(false);
+
+  // Conversion history state
+  const [conversionHistory, setConversionHistory] = useState<Record<string, Array<{
+    timestamp: string;
+    model: string;
+    originalCode: string;
+    convertedCode: string;
+    explanation: string;
+    mode: string;
+  }>>>(() => {
+    try {
+      const saved = localStorage.getItem('codeRenew_conversionHistory');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+  const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
 
   const python2Code = selectedFileName ? uploadedFiles[selectedFileName] || "" : passedCode;
   const python3Code = selectedFileName && convertedFiles[selectedFileName]
@@ -219,14 +242,23 @@ const CodeWorkspace: React.FC = () => {
       const zip = await JSZip.loadAsync(arrayBuffer);
       let extractedCount = 0;
       const mode = workspaceState.conversionMode;
-      const validExts = mode === 'java2py' ? ['.java'] : mode === 'py2java' ? ['.py'] : ['.py'];
+      const modeExtMap: Record<string, string[]> = {
+        'py2to3': ['.py'],
+        'java2py': ['.java'],
+        'py2java': ['.py'],
+        'cpp2py': ['.cpp', '.cc', '.cxx', '.h', '.hpp'],
+        'js2py': ['.js', '.jsx'],
+        'ts2py': ['.ts', '.tsx'],
+        'cs2py': ['.cs'],
+        'rb2py': ['.rb'],
+      };
+      const validExts = modeExtMap[mode] || ['.py'];
 
       const entries = Object.entries(zip.files);
       for (const [path, zipEntry] of entries) {
         if (zipEntry.dir) continue;
         const lowerPath = path.toLowerCase();
-        const isValid = validExts.some(ext => lowerPath.endsWith(ext)) ||
-          lowerPath.endsWith('.py') || lowerPath.endsWith('.java');
+        const isValid = validExts.some(ext => lowerPath.endsWith(ext));
         if (!isValid) continue;
 
         const content = await zipEntry.async('string');
@@ -244,7 +276,7 @@ const CodeWorkspace: React.FC = () => {
       if (extractedCount > 0) {
         toast(`Extracted ${extractedCount} file(s)`, { description: `From ${file.name}` });
       } else {
-        toast('No code files found', { description: 'The zip file did not contain any .py or .java files.' });
+        toast('No code files found', { description: 'The zip file did not contain matching source files.' });
       }
     } catch (err) {
       console.error('Failed to process zip file:', err);
@@ -252,14 +284,16 @@ const CodeWorkspace: React.FC = () => {
     }
   };
 
+  const SUPPORTED_EXTENSIONS = ['.py', '.java', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.js', '.jsx', '.ts', '.tsx', '.cs', '.rb'];
+
   const processFile = (file: File) => {
     const name = file.name.toLowerCase();
     if (name.endsWith('.zip')) {
       processZipFile(file);
       return;
     }
-    if (!name.endsWith('.py') && !name.endsWith('.java')) {
-      toast('Unsupported file type', { description: 'Only .py, .java, and .zip files are allowed.' });
+    if (!SUPPORTED_EXTENSIONS.some(ext => name.endsWith(ext))) {
+      toast('Unsupported file type', { description: 'Supported: .py, .java, .cpp, .js, .ts, .cs, .rb, .zip' });
       return;
     }
     const reader = new FileReader();
@@ -285,7 +319,7 @@ const CodeWorkspace: React.FC = () => {
     const files = Array.from(e.dataTransfer.files);
     files.filter(f => {
       const n = f.name.toLowerCase();
-      return n.endsWith('.py') || n.endsWith('.java') || n.endsWith('.zip');
+      return SUPPORTED_EXTENSIONS.some(ext => n.endsWith(ext)) || n.endsWith('.zip');
     }).forEach(processFile);
   };
 
@@ -294,6 +328,42 @@ const CodeWorkspace: React.FC = () => {
     if (files) Array.from(files).forEach(processFile);
     e.target.value = "";
   };
+
+  // Folder import handler
+  const handleFolderImport = async () => {
+    if (!folderPath.trim()) {
+      toast("Please enter a folder path");
+      return;
+    }
+    setIsLoadingFolder(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/scan-directory`, { path: folderPath.trim() });
+      const { files, total } = res.data;
+      if (total === 0) {
+        toast("No source files found", { description: "The directory doesn't contain supported code files." });
+      } else {
+        setUploadedFiles(prev => ({ ...prev, ...files }));
+        if (!selectedFileName) {
+          setSelectedFileName(Object.keys(files)[0]);
+        }
+        toast(`Imported ${total} file(s)`, { description: `From ${folderPath}` });
+        setFolderModalOpen(false);
+        setFolderPath("");
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.error || err.message || "Failed to scan directory";
+      toast("Import failed", { description: msg });
+    } finally {
+      setIsLoadingFolder(false);
+    }
+  };
+
+  // Persist conversion history
+  useEffect(() => {
+    try {
+      localStorage.setItem('codeRenew_conversionHistory', JSON.stringify(conversionHistory));
+    } catch { /* ignore quota errors */ }
+  }, [conversionHistory]);
 
   const handleCopy = async (code: string) => {
     try {
@@ -311,11 +381,7 @@ const CodeWorkspace: React.FC = () => {
     }
     // Check API connectivity before attempting conversion
     if (!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) {
-<<<<<<< HEAD
-      toast("API not connected", { 
-=======
       toast("API not connected", {
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
         description: "Please configure your Groq API key in Settings first.",
         action: {
           label: "Go to Settings",
@@ -353,16 +419,12 @@ const CodeWorkspace: React.FC = () => {
 
       const startTime = Date.now();
       const modelToUse = selectedModel || 'llama-3.3-70b-versatile';
-<<<<<<< HEAD
-      
-=======
 
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
       try {
         const mode = workspaceState.conversionMode;
-        const isJavaMode = mode === 'java2py' || mode === 'py2java';
-        const endpoint = isJavaMode ? `${BACKEND_URL}/convert` : `${BACKEND_URL}/migrate`;
-        const payload = isJavaMode
+        const isConvertMode = mode !== 'py2to3';
+        const endpoint = isConvertMode ? `${BACKEND_URL}/convert` : `${BACKEND_URL}/migrate`;
+        const payload = isConvertMode
           ? { code: fileContent, filename: fileName, model: modelToUse, mode }
           : { code: fileContent, filename: fileName, model: modelToUse };
         const res = await axios.post(endpoint, payload);
@@ -494,6 +556,25 @@ const CodeWorkspace: React.FC = () => {
         }
       });
 
+      // Save conversion history per file
+      setConversionHistory(prev => {
+        const updated = { ...prev };
+        conversionsToReport.forEach((report) => {
+          if (!report.fileName || !report.success) return;
+          const entry = {
+            timestamp: new Date().toISOString(),
+            model: selectedModel || 'llama-3.3-70b-versatile',
+            originalCode: report.originalCode,
+            convertedCode: report.convertedCode,
+            explanation: report.explanation,
+            mode: workspaceState.conversionMode,
+          };
+          const existing = updated[report.fileName] || [];
+          updated[report.fileName] = [entry, ...existing].slice(0, 20); // keep last 20
+        });
+        return updated;
+      });
+
       // Update workspace with file-specific explanations
       updateWorkspaceState({
         convertedFiles: newConvertedFiles,
@@ -541,14 +622,16 @@ const CodeWorkspace: React.FC = () => {
     const mode = workspaceState.conversionMode;
     let filename: string;
     let mimeType: string;
-    if (mode === 'java2py') {
-      filename = selectedFileName.replace(/\.java$/, '_converted.py');
-      mimeType = 'text/x-python;charset=utf-8';
-    } else if (mode === 'py2java') {
+    if (mode === 'py2java') {
       filename = selectedFileName.replace(/\.py$/, '_converted.java');
       mimeType = 'text/x-java;charset=utf-8';
+    } else if (mode === 'java2py') {
+      filename = selectedFileName.replace(/\.java$/, '_converted.py');
+      mimeType = 'text/x-python;charset=utf-8';
     } else {
-      filename = selectedFileName.replace(/\.py$/, '_converted.py');
+      // All other modes output Python
+      const ext = selectedFileName.lastIndexOf('.') >= 0 ? selectedFileName.substring(0, selectedFileName.lastIndexOf('.')) : selectedFileName;
+      filename = ext + '_converted.py';
       mimeType = 'text/x-python;charset=utf-8';
     }
     saveAs(new Blob([converted], { type: mimeType }), filename);
@@ -784,100 +867,95 @@ const CodeWorkspace: React.FC = () => {
     if (fileNames.length <= 1) return null;
 
     return (
-      <div className={`bg-white border-r transition-all duration-300 ${sidebarCollapsed ? 'w-12' : 'w-64'} flex flex-col`}>
+      <div className={`bg-gray-950 border-r border-gray-800/50 rounded-l-2xl transition-all duration-300 ${sidebarCollapsed ? 'w-12' : 'w-56'} flex flex-col`}>
         {/* Sidebar Header */}
-        <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
+        <div className="px-3 py-3 border-b border-gray-800 flex items-center justify-between">
           {!sidebarCollapsed && (
-            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Folder size={16} />
+            <h3 className="text-[11px] font-medium text-gray-400 flex items-center gap-2 uppercase tracking-wider">
+              <Folder size={14} className="text-gray-500" />
               Files ({fileNames.length})
             </h3>
           )}
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1 hover:bg-gray-200 rounded text-gray-600"
+            className="p-1 hover:bg-gray-800 rounded-lg text-gray-500 hover:text-gray-300 transition-colors"
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>
         </div>
 
         {/* File List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto py-1">
           {fileNames.map((fileName) => {
             const isActive = fileName === selectedFileName;
             const hasConverted = fileName in convertedFiles;
             const severity = getFileHighestSeverity(fileName);
             const issuesCount = getFileSecurityIssues(fileName).length;
+            const historyCount = (conversionHistory[fileName] || []).length;
 
             return (
               <div
                 key={fileName}
                 onClick={() => setSelectedFileName(fileName)}
-                className={`p-3 cursor-pointer border-b border-gray-100 hover:bg-gray-50 ${isActive ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
-                  } ${sidebarCollapsed ? 'px-2' : ''}`}
+                className={`px-3 py-2 cursor-pointer border-l-2 transition-all duration-150 ${
+                  isActive
+                    ? 'bg-blue-500/10 border-l-blue-400 text-white'
+                    : 'border-l-transparent text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                } ${sidebarCollapsed ? 'px-2' : ''}`}
                 title={sidebarCollapsed ? fileName : ''}
               >
                 <div className="flex items-center gap-2">
-                  {/* File icon */}
                   <div className="flex-shrink-0">
                     <FileCode
-                      size={16}
-                      className={`${fileName.endsWith('.py') ? 'text-blue-600' : 'text-gray-500'}`}
+                      size={14}
+                      className={isActive ? 'text-blue-400' : 'text-gray-500'}
                     />
                   </div>
 
-                  {/* File name (hidden when collapsed) */}
                   {!sidebarCollapsed && (
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">
+                      <div className="text-xs font-medium truncate">
                         {fileName}
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        {/* Conversion status */}
+                      <div className="flex items-center gap-2 mt-0.5">
                         {hasConverted && (
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <Shield size={10} />
-                            Converted
+                          <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
+                            <Shield size={8} />
+                            Done
                           </span>
                         )}
-
-                        {/* Security indicators */}
                         {severity && (
-                          <div className="flex items-center gap-1">
-                            {severity === 'high' && (
-                              <div className="flex items-center gap-1 text-xs text-red-600">
-                                <AlertTriangle size={10} />
-                                <span>{issuesCount} high</span>
-                              </div>
-                            )}
-                            {severity === 'medium' && !getFileSecurityIssues(fileName).some(i => i.severity === 'high') && (
-                              <div className="flex items-center gap-1 text-xs text-orange-600">
-                                <AlertCircle size={10} />
-                                <span>{issuesCount} med</span>
-                              </div>
-                            )}
-                            {severity === 'low' && !getFileSecurityIssues(fileName).some(i => i.severity === 'high' || i.severity === 'medium') && (
-                              <div className="flex items-center gap-1 text-xs text-yellow-600">
-                                <AlertCircle size={10} />
-                                <span>{issuesCount} low</span>
-                              </div>
-                            )}
-                          </div>
+                          <span className={`text-[10px] flex items-center gap-0.5 ${
+                            severity === 'high' ? 'text-red-400' :
+                            severity === 'medium' ? 'text-orange-400' : 'text-yellow-400'
+                          }`}>
+                            <AlertCircle size={8} />
+                            {issuesCount}
+                          </span>
+                        )}
+                        {historyCount > 0 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setShowHistoryFor(showHistoryFor === fileName ? null : fileName); }}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                            title={`${historyCount} conversion(s)`}
+                          >
+                            <History size={8} />
+                            {historyCount}
+                          </button>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Indicators when collapsed */}
                   {sidebarCollapsed && (
                     <div className="flex flex-col items-center gap-1">
                       {hasConverted && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full" title="Converted" />
+                        <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full" title="Converted" />
                       )}
                       {severity && (
-                        <div className={`w-2 h-2 rounded-full ${severity === 'high' ? 'bg-red-500' :
-                            severity === 'medium' ? 'bg-orange-500' : 'bg-yellow-500'
+                        <div className={`w-1.5 h-1.5 rounded-full ${severity === 'high' ? 'bg-red-400' :
+                            severity === 'medium' ? 'bg-orange-400' : 'bg-yellow-400'
                           }`} title={`${issuesCount} ${severity} severity issues`} />
                       )}
                     </div>
@@ -1057,123 +1135,140 @@ const CodeWorkspace: React.FC = () => {
 
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50/30 min-h-screen">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900">Code Workspace</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Using {getCurrentModelName()} for code conversion
-            </p>
-            <div className="mt-2 flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">Mode:</label>
-              <select
-                value={workspaceState.conversionMode}
-                onChange={(e) => updateWorkspaceState({ conversionMode: e.target.value as 'py2to3' | 'java2py' | 'py2java' })}
-                className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        {/* Header Card */}
+        <div className="mb-6 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/60 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">Code Workspace</h2>
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Using {getCurrentModelName()}
+              </p>
+            </div>
+
+            {/* Mode Selector */}
+            <select
+              value={workspaceState.conversionMode}
+              onChange={(e) => updateWorkspaceState({ conversionMode: e.target.value as WorkspaceState['conversionMode'] })}
+              className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            >
+              <option value="py2to3">Python 2 → Python 3</option>
+              <option value="java2py">Java → Python</option>
+              <option value="py2java">Python → Java</option>
+              <option value="cpp2py">C++ → Python</option>
+              <option value="js2py">JavaScript → Python</option>
+              <option value="ts2py">TypeScript → Python</option>
+              <option value="cs2py">C# → Python</option>
+              <option value="rb2py">Ruby → Python</option>
+            </select>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleClearWorkspace}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-lg transition-colors"
+                title="Clear workspace"
               >
-                <option value="py2to3">Python 2 → Python 3</option>
-                <option value="java2py">Java → Python</option>
-                <option value="py2java">Python → Java</option>
-              </select>
+                <X size={18} />
+              </button>
+              <button
+                onClick={handleModernize}
+                disabled={isConverting || !apiConnectivity.isConnected || !apiConnectivity.groqConfigured}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2 rounded-xl hover:from-blue-700 hover:to-indigo-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium shadow-sm shadow-blue-200 transition-all duration-200 hover:shadow-md hover:shadow-blue-200"
+                title={!apiConnectivity.isConnected || !apiConnectivity.groqConfigured ? "API not connected. Please configure your Groq API key in Settings." : ""}
+              >
+                {isConverting ? <RotateCcw size={15} className="animate-spin" /> : <Play size={15} />}
+                {isConverting ? (
+                  Object.keys(uploadedFiles).length > 1
+                    ? "Converting..."
+                    : "Converting..."
+                ) : workspaceState.conversionMode === 'py2to3' ? "Convert to Python 3"
+                  : workspaceState.conversionMode === 'java2py' ? "Convert to Python"
+                    : workspaceState.conversionMode === 'py2java' ? "Convert to Java"
+                      : "Convert"}
+              </button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleClearWorkspace}
-              className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 flex items-center gap-2"
-              title="Clear workspace"
-            >
-              <X size={16} />
-              Clear
-            </button>
-            <button
-              onClick={handleModernize}
-              disabled={isConverting || !apiConnectivity.isConnected || !apiConnectivity.groqConfigured}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={!apiConnectivity.isConnected || !apiConnectivity.groqConfigured ? "API not connected. Please configure your Groq API key in Settings." : ""}
-            >
-              {isConverting ? <RotateCcw size={16} className="animate-spin" /> : <Play size={16} />}
-              {isConverting ? (
-                Object.keys(uploadedFiles).length > 1
-                  ? "Converting files..."
-                  : "Converting..."
-              ) : workspaceState.conversionMode === 'py2to3' ? "Convert to Python 3"
-                : workspaceState.conversionMode === 'java2py' ? "Convert to Python"
-                  : "Convert to Java"}
-            </button>
-            {(!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
-              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <div className="flex items-center gap-2 text-yellow-700 text-sm">
-                  <AlertCircle size={16} />
-                  <span>API not connected. Please configure your Groq API key in Settings.</span>
-<<<<<<< HEAD
-                  <button 
-=======
-                  <button
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
-                    onClick={() => navigate("/settings")}
-                    className="text-blue-600 hover:text-blue-800 underline"
-                  >
-                    Go to Settings
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          {(!apiConnectivity.isConnected || !apiConnectivity.groqConfigured) && (
+            <div className="mt-3 flex items-center gap-2 text-amber-700 text-xs bg-amber-50 border border-amber-200/60 rounded-lg px-3 py-2">
+              <AlertCircle size={14} />
+              <span>API not connected. Configure your Groq API key in Settings.</span>
+              <button
+                onClick={() => navigate("/settings")}
+                className="ml-auto text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Settings →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Security Alert Banner */}
         {latestReport && latestReport.securityIssues.length > 0 && (
-          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between">
+          <div className="mb-4 p-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-xl flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="bg-yellow-100 p-2 rounded-full">
-                <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+              <div className="bg-amber-100/80 p-2 rounded-xl">
+                <AlertTriangle size={18} className="text-amber-600" />
               </div>
               <div>
-                <h4 className="font-semibold text-yellow-800">Security Issues Detected</h4>
-                <p className="text-sm text-yellow-700">
-                  {latestReport.securityIssues.length} issue(s) found in the converted code
+                <h4 className="font-semibold text-amber-800 text-sm">Security Issues Detected</h4>
+                <p className="text-xs text-amber-600">
+                  {latestReport.securityIssues.length} issue(s) found in converted code
                 </p>
               </div>
             </div>
             <button
               onClick={() => navigate("/security")}
-              className="px-4 py-2 bg-yellow-600 text-white rounded-md text-sm hover:bg-yellow-700"
+              className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition-colors"
             >
               View Details
             </button>
           </div>
         )}
 
-        <div className="flex gap-6 h-[60vh]">
+        <div className="flex gap-4 h-[62vh]">
           {/* File Sidebar */}
           {renderFileSidebar()}
 
           {/* Main Content Area */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg shadow-sm border flex flex-col">
-              <div className={`p-4 border-b flex items-center justify-between ${workspaceState.conversionMode === 'py2to3' ? 'bg-red-50 border-red-200' :
-                  workspaceState.conversionMode === 'java2py' ? 'bg-orange-50 border-orange-200' :
-                    'bg-blue-50 border-blue-200'
-                }`}>
-                <h3 className={`font-semibold flex items-center gap-2 ${workspaceState.conversionMode === 'py2to3' ? 'text-red-800' :
-                    workspaceState.conversionMode === 'java2py' ? 'text-orange-800' :
-                      'text-blue-800'
-                  }`}>
-                  <FileText size={16} /> {
-                    workspaceState.conversionMode === 'py2to3' ? 'Python 2 (Legacy)' :
-                      workspaceState.conversionMode === 'java2py' ? 'Java (Source)' :
-                        'Python (Source)'
-                  }
-                </h3>
-                <div className="flex gap-2">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Source Panel */}
+            <div className="bg-gray-950 rounded-2xl shadow-lg border border-gray-800/50 flex flex-col overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between bg-gray-900/80 border-b border-gray-800">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${
+                    workspaceState.conversionMode === 'py2to3' ? 'bg-red-400' :
+                    workspaceState.conversionMode === 'java2py' ? 'bg-orange-400' :
+                    workspaceState.conversionMode === 'py2java' ? 'bg-blue-400' :
+                    workspaceState.conversionMode === 'cpp2py' ? 'bg-purple-400' :
+                    workspaceState.conversionMode === 'js2py' ? 'bg-yellow-400' :
+                    workspaceState.conversionMode === 'ts2py' ? 'bg-cyan-400' :
+                    workspaceState.conversionMode === 'cs2py' ? 'bg-green-400' :
+                    'bg-pink-400'
+                  }`}></span>
+                  <h3 className="text-xs font-medium text-gray-300 tracking-wide uppercase">
+                    {{
+                      py2to3: 'Python 2 — Source',
+                      java2py: 'Java — Source',
+                      py2java: 'Python — Source',
+                      cpp2py: 'C++ — Source',
+                      js2py: 'JavaScript — Source',
+                      ts2py: 'TypeScript — Source',
+                      cs2py: 'C# — Source',
+                      rb2py: 'Ruby — Source',
+                    }[workspaceState.conversionMode]}
+                  </h3>
+                  {selectedFileName && (
+                    <span className="text-[10px] text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">{selectedFileName}</span>
+                  )}
+                </div>
+                <div className="flex gap-1.5">
                   <Dialog open={githubModalOpenPython2} onOpenChange={setGithubModalOpenPython2}>
                     <DialogTrigger asChild>
-                      <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
-                        <Github size={12} /> GitHub
+                      <button className="text-gray-400 hover:text-white px-2.5 py-1 rounded-lg text-xs hover:bg-gray-800 flex items-center gap-1 transition-colors">
+                        <Github size={12} /> Import
                       </button>
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
@@ -1247,10 +1342,48 @@ const CodeWorkspace: React.FC = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
-                  <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 flex items-center gap-1">
+                  <button onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white px-2.5 py-1 rounded-lg text-xs hover:bg-gray-800 flex items-center gap-1 transition-colors">
                     <FolderOpen size={12} /> Upload
                   </button>
-                  <input ref={fileInputRef} type="file" style={{ display: "none" }} accept=".py,.java,.zip" onChange={handleUpload} multiple />
+                  <Dialog open={folderModalOpen} onOpenChange={setFolderModalOpen}>
+                    <DialogTrigger asChild>
+                      <button className="text-gray-400 hover:text-white px-2.5 py-1 rounded-lg text-xs hover:bg-gray-800 flex items-center gap-1 transition-colors">
+                        <FolderInput size={12} /> Folder
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[450px]">
+                      <DialogHeader>
+                        <DialogTitle>Import Local Directory</DialogTitle>
+                        <DialogDescription>
+                          Enter the full path to a folder to recursively scan for source files.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <input
+                          type="text"
+                          placeholder="C:\Projects\my-app  or  /home/user/projects/app"
+                          value={folderPath}
+                          onChange={(e) => setFolderPath(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-md text-sm"
+                          onKeyDown={(e) => e.key === 'Enter' && handleFolderImport()}
+                        />
+                        <div className="flex justify-end gap-2">
+                          <DialogClose asChild>
+                            <button className="px-4 py-2 border rounded-md text-sm hover:bg-muted">Cancel</button>
+                          </DialogClose>
+                          <button
+                            onClick={handleFolderImport}
+                            disabled={isLoadingFolder}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {isLoadingFolder ? <RotateCcw size={14} className="animate-spin" /> : <FolderInput size={14} />}
+                            {isLoadingFolder ? "Scanning..." : "Import"}
+                          </button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                  <input ref={fileInputRef} type="file" style={{ display: "none" }} accept=".py,.java,.cpp,.cc,.cxx,.h,.hpp,.js,.jsx,.ts,.tsx,.cs,.rb,.zip" onChange={handleUpload} multiple />
                 </div>
               </div>
               <div className="flex-1 relative">
@@ -1259,42 +1392,48 @@ const CodeWorkspace: React.FC = () => {
                   value={python2Code}
                   onChange={handlePython2CodeChange}
                   onScroll={() => handleScroll("left")}
-                  className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-green-400"
-                  placeholder={workspaceState.conversionMode === 'py2to3' ? 'Paste or upload Python 2 code...' : workspaceState.conversionMode === 'java2py' ? 'Paste or upload Java code...' : 'Paste or upload Python code...'}
+                  className="w-full h-full p-4 font-mono text-[13px] leading-relaxed bg-transparent text-emerald-400 resize-none focus:outline-none placeholder:text-gray-600"
+                  placeholder={
+                    workspaceState.conversionMode === 'py2to3' ? 'Paste or upload Python 2 code...' :
+                    workspaceState.conversionMode === 'java2py' ? 'Paste or upload Java code...' :
+                    workspaceState.conversionMode === 'py2java' ? 'Paste or upload Python code...' :
+                    workspaceState.conversionMode === 'cpp2py' ? 'Paste or upload C++ code...' :
+                    workspaceState.conversionMode === 'js2py' ? 'Paste or upload JavaScript code...' :
+                    workspaceState.conversionMode === 'ts2py' ? 'Paste or upload TypeScript code...' :
+                    workspaceState.conversionMode === 'cs2py' ? 'Paste or upload C# code...' :
+                    'Paste or upload Ruby code...'
+                  }
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
                 />
                 {dragOver && (
-                  <div className="absolute inset-0 bg-blue-500 bg-opacity-20 border-2 border-dashed border-blue-500 flex items-center justify-center">
-                    <div className="text-blue-700 font-semibold">Drop files here (.py, .java, .zip)</div>
+                  <div className="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-400/50 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                    <div className="text-blue-300 font-medium text-sm">Drop source files here</div>
                   </div>
                 )}
-                <button onClick={() => handleCopy(python2Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
-                  <Copy size={14} />
+                <button onClick={() => handleCopy(python2Code)} className="absolute top-2 right-2 p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                  <Copy size={13} />
                 </button>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border flex flex-col">
-              <div className={`p-4 border-b flex items-center justify-between ${workspaceState.conversionMode === 'py2to3' ? 'bg-green-50 border-green-200' :
-                  workspaceState.conversionMode === 'java2py' ? 'bg-blue-50 border-blue-200' :
-                    'bg-orange-50 border-orange-200'
-                }`}>
-                <h3 className={`font-semibold flex items-center gap-2 ${workspaceState.conversionMode === 'py2to3' ? 'text-green-800' :
-                    workspaceState.conversionMode === 'java2py' ? 'text-blue-800' :
-                      'text-orange-800'
-                  }`}>
-                  <FileText size={16} /> {
-                    workspaceState.conversionMode === 'py2to3' ? 'Python 3 (Converted)' :
-                      workspaceState.conversionMode === 'java2py' ? 'Python (Converted)' :
-                        'Java (Converted)'
-                  }
-                </h3>
-                <div className="flex gap-2">
+            {/* Output Panel */}
+            <div className="bg-gray-950 rounded-2xl shadow-lg border border-gray-800/50 flex flex-col overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between bg-gray-900/80 border-b border-gray-800">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${
+                    workspaceState.conversionMode === 'py2java' ? 'bg-orange-400' : 'bg-emerald-400'
+                  }`}></span>
+                  <h3 className="text-xs font-medium text-gray-300 tracking-wide uppercase">
+                    {workspaceState.conversionMode === 'py2java' ? 'Java — Output' :
+                      workspaceState.conversionMode === 'py2to3' ? 'Python 3 — Output' : 'Python — Output'}
+                  </h3>
+                </div>
+                <div className="flex gap-1.5">
                   <Dialog open={githubModalOpenPython3} onOpenChange={setGithubModalOpenPython3}>
                     <DialogTrigger asChild>
-                      <button className="bg-gray-800 text-white px-3 py-1 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
+                      <button className="text-gray-400 hover:text-white px-2.5 py-1 rounded-lg text-xs hover:bg-gray-800 flex items-center gap-1 transition-colors">
                         <Github size={12} /> Commit
                       </button>
                     </DialogTrigger>
@@ -1363,8 +1502,8 @@ const CodeWorkspace: React.FC = () => {
 
                   </Dialog>
 
-                  <button onClick={handleDownload} className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 flex items-center gap-1">
-                    <Download size={12} /> Download
+                  <button onClick={handleDownload} className="text-gray-400 hover:text-white px-2.5 py-1 rounded-lg text-xs hover:bg-gray-800 flex items-center gap-1 transition-colors">
+                    <Download size={12} /> Save
                   </button>
                 </div>
               </div>
@@ -1374,35 +1513,83 @@ const CodeWorkspace: React.FC = () => {
                   value={python3Code}
                   readOnly
                   onScroll={() => handleScroll("right")}
-                  className="w-full h-full p-4 font-mono text-sm bg-gray-900 text-blue-400"
+                  className="w-full h-full p-4 font-mono text-[13px] leading-relaxed bg-transparent text-sky-400 resize-none focus:outline-none placeholder:text-gray-600"
                   placeholder="Converted code will appear here..."
                 />
-                <button onClick={() => handleCopy(python3Code)} className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded text-white">
-                  <Copy size={14} />
+                <button onClick={() => handleCopy(python3Code)} className="absolute top-2 right-2 p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+                  <Copy size={13} />
                 </button>
               </div>
             </div>
           </div>
         </div>
 
+        {/* Conversion History Panel */}
+        {showHistoryFor && conversionHistory[showHistoryFor] && conversionHistory[showHistoryFor].length > 0 && (
+          <div className="mt-4 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/60 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 bg-gradient-to-r from-violet-50/50 to-purple-50/50 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                <History size={16} className="text-violet-500" />
+                Conversion History — {showHistoryFor}
+              </h4>
+              <button onClick={() => setShowHistoryFor(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 max-h-64 overflow-y-auto">
+              {conversionHistory[showHistoryFor].map((entry, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 border rounded-xl hover:bg-gray-50 cursor-pointer transition-colors group"
+                  onClick={() => {
+                    setConvertedFiles(prev => ({ ...prev, [showHistoryFor!]: entry.convertedCode }));
+                    setSelectedFileName(showHistoryFor!);
+                    updateWorkspaceState({
+                      convertedFiles: { ...convertedFiles, [showHistoryFor!]: entry.convertedCode },
+                      fileExplanations: { ...workspaceState.fileExplanations, [showHistoryFor!]: entry.explanation },
+                      showSummary: true,
+                    });
+                    setShowSummary(true);
+                    toast("Restored from history", { description: `${new Date(entry.timestamp).toLocaleString()}` });
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </span>
+                      <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">{entry.mode}</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 group-hover:text-blue-500 transition-colors">
+                      Click to restore
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 truncate">
+                    Model: {entry.model} — {entry.explanation.split('\n')[0]?.substring(0, 80)}...
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Change Explanation Panel */}
-        <div className="mt-6 bg-white rounded-lg shadow-sm border">
-          <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-            <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="mt-4 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/60 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 bg-gradient-to-r from-blue-50/50 to-indigo-50/50">
+            <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+              <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
               Conversion Summary
             </h4>
           </div>
-          <div className="p-6">
+          <div className="p-5">
             {codeChanges && showSummary ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <div className="h-1 w-1 bg-blue-500 rounded-full"></div>
-                  <span className="text-sm font-medium text-gray-700">
-                    Changes applied to {selectedFileName}
+                  <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <span className="text-xs font-medium text-gray-500">
+                    Changes applied to <span className="text-gray-800">{selectedFileName}</span>
                   </span>
                 </div>
                 <div className="relative">
@@ -1543,23 +1730,25 @@ const CodeWorkspace: React.FC = () => {
                 </div>
 
                 {/* Success indicator */}
-                <div className="mt-6 flex items-center gap-2 text-green-600 bg-green-50 px-4 py-3 rounded-lg">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="mt-5 flex items-center gap-2 text-emerald-600 bg-emerald-50/60 px-4 py-2.5 rounded-xl border border-emerald-100">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="text-sm font-medium">Conversion completed successfully</span>
+                  <span className="text-xs font-medium">Conversion completed successfully</span>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-8">
-                <svg className="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <p className="text-gray-500 text-sm">
-                  No conversion summary available yet
+              <div className="text-center py-10">
+                <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                  <svg className="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="text-gray-400 text-sm font-medium">
+                  No conversion summary yet
                 </p>
-                <p className="text-gray-400 text-xs mt-1">
-                  Run a conversion to see detailed changes here
+                <p className="text-gray-300 text-xs mt-1">
+                  Run a conversion to see detailed changes
                 </p>
               </div>
             )}

@@ -21,7 +21,7 @@ import { useAppContext } from "@/context/AppContext";
 import { useNavigate } from "react-router-dom";
 import KnowledgeGraph from "./KnowledgeGraph";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "http://127.0.0.1:5000";
 
 type WizardStep = "input" | "scanning" | "select" | "converting" | "push" | "done";
 

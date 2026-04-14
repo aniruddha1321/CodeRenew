@@ -66,7 +66,7 @@ interface Monitor {
   tracked_files: number;
 }
 
-const BACKEND = "http://localhost:5000";
+const BACKEND = "http://127.0.0.1:5000";
 
 const RecoveryLoop: React.FC = () => {
   const { apiConnectivity, selectedModel, gitHubConnectivity } = useAppContext();
@@ -74,6 +74,7 @@ const RecoveryLoop: React.FC = () => {
   // Form state
   const [repoUrl, setRepoUrl] = useState("");
   const [pollInterval, setPollInterval] = useState(300);
+  const [customInterval, setCustomInterval] = useState("");
   const [autoFix, setAutoFix] = useState(true);
 
   // Monitor state
@@ -281,7 +282,7 @@ const RecoveryLoop: React.FC = () => {
     }
   };
 
-  const canStart = apiConnectivity.isConnected && apiConnectivity.groqConfigured;
+  const canStart = apiConnectivity.isConnected && apiConnectivity.groqConfigured && pollInterval > 0;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -296,19 +297,57 @@ const RecoveryLoop: React.FC = () => {
             Continuous monitoring &amp; auto-remediation agent for customer codebases
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-            monitors.some((m) => m.status === "active")
-              ? "bg-green-100 text-green-800"
-              : "bg-gray-100 text-gray-600"
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${
-              monitors.some((m) => m.status === "active") ? "bg-green-500 animate-pulse" : "bg-gray-400"
-            }`} />
-            {monitors.filter((m) => m.status === "active").length} Active Monitor(s)
-          </span>
-        </div>
       </div>
+
+      {/* Status Overview Cards */}
+      {monitors.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl border p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Monitors</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">
+                  {monitors.filter((m) => m.status === "active").length}
+                </p>
+              </div>
+              <Activity className={`text-purple-600 ${
+                monitors.some((m) => m.status === "active") ? "animate-pulse" : ""
+              }`} size={24} />
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Repos</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">{monitors.length}</p>
+              </div>
+              <Github className="text-blue-600" size={24} />
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Issues</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">
+                  {monitors.reduce((sum, m) => sum + m.stats.issues_found, 0)}
+                </p>
+              </div>
+              <Shield className="text-yellow-600" size={24} />
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">PRs Created</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">
+                  {monitors.reduce((sum, m) => sum + m.stats.prs_created, 0)}
+                </p>
+              </div>
+              <GitPullRequest className="text-green-600" size={24} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Setup Card */}
       <div className="bg-white rounded-xl shadow-sm border p-6">
@@ -367,18 +406,60 @@ const RecoveryLoop: React.FC = () => {
             <label className="block text-sm font-medium text-slate-600 mb-1">
               Poll Interval
             </label>
-            <select
-              value={pollInterval}
-              onChange={(e) => setPollInterval(Number(e.target.value))}
-              className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
-              disabled={isStarting}
-            >
-              <option value={60}>Every 1 min</option>
-              <option value={300}>Every 5 min</option>
-              <option value={600}>Every 10 min</option>
-              <option value={1800}>Every 30 min</option>
-              <option value={3600}>Every 1 hour</option>
-            </select>
+            {(() => {
+              const presets = [60, 300, 600, 1800, 3600, 86400];
+              const isCustom = pollInterval === -1 || !presets.includes(pollInterval);
+              const selectValue = pollInterval === -1 ? -1 : (presets.includes(pollInterval) ? pollInterval : -1);
+              return (
+                <>
+                  <select
+                    value={selectValue}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (val === -1) {
+                        setPollInterval(-1);
+                        setCustomInterval("");
+                      } else {
+                        setPollInterval(val);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                    disabled={isStarting}
+                  >
+                    <option value={60}>Every 1 min</option>
+                    <option value={300}>Every 5 min</option>
+                    <option value={600}>Every 10 min</option>
+                    <option value={1800}>Every 30 min</option>
+                    <option value={3600}>Every 1 hour</option>
+                    <option value={86400}>Every 24 hours</option>
+                    <option value={-1}>{isCustom && pollInterval > 0 ? `Custom (${pollInterval}s)` : 'Custom...'}</option>
+                  </select>
+                  {pollInterval === -1 && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="number"
+                        min={10}
+                        placeholder="Seconds"
+                        value={customInterval}
+                        onChange={(e) => setCustomInterval(e.target.value)}
+                        className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+                        disabled={isStarting}
+                      />
+                      <button
+                        onClick={() => {
+                          const val = Number(customInterval);
+                          if (val >= 10) setPollInterval(val);
+                        }}
+                        disabled={!customInterval || Number(customInterval) < 10}
+                        className="px-3 py-1.5 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 transition-colors"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           <div className="flex flex-col justify-end">
@@ -502,7 +583,9 @@ const RecoveryLoop: React.FC = () => {
                   <span className="text-slate-400">
                     Polling every {activeMonitor.poll_interval < 60
                       ? `${activeMonitor.poll_interval}s`
-                      : `${Math.round(activeMonitor.poll_interval / 60)}m`}
+                      : activeMonitor.poll_interval < 3600
+                        ? `${Math.round(activeMonitor.poll_interval / 60)}m`
+                        : `${Math.round(activeMonitor.poll_interval / 3600)}h`}
                   </span>
                   <span className="mx-2 text-slate-300">|</span>
                   <span className="text-slate-400">

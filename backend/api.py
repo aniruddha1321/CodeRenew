@@ -19,7 +19,17 @@ import threading
 load_dotenv()
 app = Flask(__name__)
 
-allowed_origins = os.getenv("FRONTEND_ORIGIN", "http://localhost:8080")
+default_origins = [
+    "http://localhost:8080",
+    "http://localhost:8081",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:8081",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+allowed_origins = os.getenv("FRONTEND_ORIGIN", ",".join(default_origins))
 
 origins = [o.strip() for o in allowed_origins.split(",") if o.strip()]
 CORS(app, resources={r"/*": {"origins": origins}}, supports_credentials=True)
@@ -200,14 +210,15 @@ def migrate():
 @app.route("/convert", methods=["POST"])
 def convert():
     code = request.json.get("code")
-    mode = request.json.get("mode")  # "java2py" or "py2java"
+    mode = request.json.get("mode")  # "java2py", "py2java", "cpp2py", "js2py", "ts2py", "cs2py", "rb2py"
     filename = request.json.get("filename", "code")
     model = request.json.get("model", "llama-3.3-70b-versatile")
     
     if not code:
         return jsonify({"status": "error", "message": "No code given"}), 400
     
-    if mode not in ("java2py", "py2java"):
+    valid_modes = ("java2py", "py2java", "cpp2py", "js2py", "ts2py", "cs2py", "rb2py")
+    if mode not in valid_modes:
         return jsonify({"status": "error", "message": f"Invalid conversion mode: {mode}"}), 400
     
     try:
@@ -522,6 +533,195 @@ def recovery_issues():
     if result.get("success"):
         return jsonify(result), 200
     return jsonify(result), 404
+
+
+# ─── Local Directory Scan Endpoint ───
+
+@app.route("/api/scan-directory", methods=["POST"])
+def scan_directory():
+    """Scan a local directory for source code files."""
+    data = request.get_json()
+    dir_path = data.get("path", "").strip()
+    
+    if not dir_path:
+        return jsonify({"error": "path is required"}), 400
+    
+    # Resolve and validate the path
+    resolved = os.path.realpath(dir_path)
+    if not os.path.isdir(resolved):
+        return jsonify({"error": "Directory does not exist"}), 404
+    
+    SUPPORTED_EXTS = {'.py', '.java', '.cpp', '.cc', '.cxx', '.h', '.hpp',
+                      '.js', '.jsx', '.ts', '.tsx', '.cs', '.rb'}
+    
+    files = {}
+    for root, _dirs, filenames in os.walk(resolved):
+        # Skip hidden dirs, node_modules, __pycache__, .git etc.
+        rel_root = os.path.relpath(root, resolved)
+        parts = rel_root.split(os.sep)
+        if any(p.startswith('.') or p in ('node_modules', '__pycache__', 'venv', '.git', 'dist', 'build', 'target') for p in parts if p != '.'):
+            continue
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext in SUPPORTED_EXTS:
+                full_path = os.path.join(root, fname)
+                try:
+                    with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                    # Use relative path as key to avoid collisions
+                    rel_path = os.path.relpath(full_path, resolved)
+                    files[rel_path] = content
+                except Exception:
+                    continue
+    
+    return jsonify({
+        "success": True,
+        "directory": resolved,
+        "files": files,
+        "total": len(files),
+    })
+
+
+# ─── Chatbot Endpoint ───
+
+CHATBOT_SYSTEM_PROMPT = """You are CodeRenew Assistant, a helpful chatbot for the CodeRenew application.
+CodeRenew is a desktop application for legacy code modernization and cross-language code conversion, powered by AI (Groq LLMs).
+
+CORE FEATURES:
+
+1. **Code Workspace** — The main conversion hub. Users can:
+   - Upload source code files (drag-and-drop or file picker)
+   - Select a conversion mode:
+     • Python 2 → Python 3 (uses lib2to3 + AI refinement for idiomatic Python 3 with type hints)
+     • Java → Python
+     • Python → Java
+     • C++ → Python
+     • JavaScript → Python
+     • TypeScript → Python
+     • C# → Python
+     • Ruby → Python
+   - View converted code side-by-side with the original
+   - Download converted files individually or as a ZIP
+   - See an AI-generated explanation of what changed
+
+2. **Clone & Convert** — GitHub integration for bulk conversion:
+   - Clone any GitHub repository by URL (supports private repos with token)
+   - Browse and select specific files to convert
+   - Bulk convert all selected files at once
+   - Push converted files to a new branch and create a Pull Request automatically
+   - View a knowledge graph of the repository structure
+
+3. **Security Scan** — Automated compliance checking:
+   - Scans converted code for security vulnerabilities
+   - Checks against HIPAA, ISO 27001, and general security standards
+   - Shows issues by severity: High, Medium, Low
+   - Provides specific recommendations and fix suggestions for each issue
+
+4. **Recovery Loop** — Continuous monitoring:
+   - Monitor a GitHub repository for code issues
+   - Set custom poll intervals
+   - Enable auto-fix to automatically detect and propose fixes
+   - View event logs and issue history
+
+5. **Dashboard** — Overview and analytics:
+   - Total files converted, success rate, security issues found, average conversion time
+   - Recent activity feed
+   - Export reports as CSV or PDF
+
+6. **Summary Report** — Conversion history:
+   - View all past conversion reports in a table
+   - Filter by status, see execution times
+   - Export data
+
+7. **Settings** — Configuration:
+   - Groq API key (required for all AI-powered features)
+   - GitHub personal access token (required for GitHub features)
+   - AI model selection
+
+Available AI Models (via Groq):
+- Llama 3.3 70B Versatile — most capable, best for complex conversions
+- Llama 3.1 8B Instant — fastest, good for simple tasks
+- Mixtral 8x7B — balanced speed and accuracy
+- Gemma 2 9B — compact, good code understanding
+
+Common user workflows:
+1. First-time setup: Go to Settings → Enter Groq API key → (Optional) Enter GitHub token
+2. Convert files: Go to Code Workspace → Select conversion mode → Upload files → Click Convert → Download
+3. Clone & convert a repo: Go to Clone & Convert → Paste repo URL → Clone → Select files → Convert → Push to new branch
+4. Security check: After conversion, go to Security Scan to check for compliance issues
+5. Monitor a repo: Go to Recovery Loop → Enter repo URL → Start monitoring → View detected issues
+
+IMPORTANT RULES:
+- ONLY answer questions about CodeRenew features, usage, and troubleshooting.
+- If the user asks about anything unrelated to CodeRenew (weather, general knowledge, coding questions not about the app, etc.), politely respond: "I'm CodeRenew Assistant and can only help with questions about this application. Try asking about code conversion, security scanning, GitHub integration, or app settings!"
+- Keep answers concise, friendly, and actionable.
+- When explaining how to use a feature, provide step-by-step instructions.
+- If a user reports an error, suggest practical troubleshooting steps (check API key, check backend connection, etc.).
+- Do NOT say the app only does Python 2 to 3 conversion — it supports 8 conversion modes across multiple languages.
+"""
+
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    """Scoped chatbot endpoint - only answers CodeRenew-related questions."""
+    data = request.get_json()
+    user_message = data.get("message", "").strip()
+    history = data.get("history", [])  # list of {"role": "user"|"assistant", "content": "..."}
+
+    if not user_message:
+        return jsonify({"reply": "Please ask a question about CodeRenew."}), 400
+
+    # Fetch the existing Groq API key from secure storage
+    try:
+        from translate import fetch_api_key
+        api_key = fetch_api_key("groq")
+        if not api_key:
+            return jsonify({
+                "reply": "⚠️ Groq API key is not configured. Please go to **Settings** and add your API key first."
+            }), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch API key: {str(e)}"}), 500
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+
+        # Build messages: system prompt + recent history + current message
+        messages = [{"role": "system", "content": CHATBOT_SYSTEM_PROMPT}]
+
+        # Include last 10 messages for conversation context
+        if history:
+            messages.extend(history[-10:])
+
+        messages.append({"role": "user", "content": user_message})
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7,
+        )
+
+        reply = response.choices[0].message.content
+        return jsonify({"reply": reply}), 200
+
+    except Exception as e:
+        error_msg = str(e)
+        if "rate_limit" in error_msg.lower() or "429" in error_msg:
+            return jsonify({
+                "reply": "⚠️ Rate limit reached. Please wait a moment and try again."
+            }), 200
+        if "invalid_api_key" in error_msg.lower() or "401" in error_msg:
+            return jsonify({
+                "reply": "⚠️ Your Groq API key is invalid or expired. Please go to **Settings** and update your API key."
+            }), 200
+        if "authentication" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            return jsonify({
+                "reply": "⚠️ Authentication failed. Please check your Groq API key in **Settings**."
+            }), 200
+        return jsonify({
+            "reply": "⚠️ Something went wrong. Please make sure the backend is running and your API key is valid."
+        }), 200
 
 
 if __name__ == "__main__":

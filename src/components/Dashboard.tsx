@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useAppContext } from "@/context/AppContext";
 import { exportReportsCsv, exportReportsPdf } from "@/lib/exportUtils";
+import ApiHealthBadge from "./ApiHealthBadge";
 
 
 const Dashboard: React.FC = () => {
@@ -41,24 +42,27 @@ const Dashboard: React.FC = () => {
   return (
     <div className="px-8 pb-8 pt-5 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
-          {reports.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => exportReportsCsv(reports)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
-              >
-                <Download size={14} /> CSV
-              </button>
-              <button
-                onClick={() => exportReportsPdf(reports)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Download size={14} /> PDF
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            <ApiHealthBadge />
+            {reports.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportReportsCsv(reports)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
+                >
+                  <Download size={14} /> CSV
+                </button>
+                <button
+                  onClick={() => exportReportsPdf(reports)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Download size={14} /> PDF
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* API Connectivity Banner */}

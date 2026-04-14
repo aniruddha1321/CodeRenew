@@ -137,7 +137,8 @@ def clean_ai_response(response: str, language: str = "python") -> str:
     import re
     
     # Pattern to match code blocks: ```python\n...code...\n``` or ```java\n...code...\n``` or ```\n...code...\n```
-    code_block_pattern = r'```(?:python|java)?\s*\n?(.*?)\n?```'
+    lang_tags = r'python|java|cpp|c\+\+|javascript|typescript|csharp|cs|ruby'
+    code_block_pattern = rf'```(?:{lang_tags})?\s*\n?(.*?)\n?```'
     
     # Check if the response is wrapped in code blocks
     match = re.search(code_block_pattern, response, re.DOTALL)
@@ -148,7 +149,7 @@ def clean_ai_response(response: str, language: str = "python") -> str:
         # If no code blocks found, just clean up any stray backticks
         cleaned = response.strip()
         # Remove any leading/trailing triple backticks
-        cleaned = re.sub(r'^```(?:python|java)?\s*\n?', '', cleaned)
+        cleaned = re.sub(r'^```(?:python|java|cpp|c\+\+|javascript|typescript|csharp|cs|ruby)?\s*\n?', '', cleaned)
         cleaned = re.sub(r'\n?```\s*$', '', cleaned)
     
     # Remove any explanatory text that might appear before the code
@@ -493,10 +494,86 @@ def ai_convert_python_to_java(code, model_name=None):
     return (resp, compare)
 
 
+def ai_convert_generic(code, source_lang, target_lang, model_name=None):
+    """Generic AI-powered code conversion between any two languages."""
+    if model_name is None:
+        model_name = MODEL_NAME
+
+    target_clean = clean_ai_response.__name__  # just to reference; actual language tag below
+    output_lang_tag = "python" if "python" in target_lang.lower() else target_lang.lower()
+
+    system_prompt = (
+        f"You convert {source_lang} code into idiomatic {target_lang} code. "
+        "CRITICAL: Your response must ONLY contain raw code. "
+        "DO NOT include markdown code blocks, backticks, or any formatting. "
+        "DO NOT include explanations, comments, or text before or after the code."
+    )
+    user_prompt = (
+        f"Below is {source_lang} code. Convert it to idiomatic {target_lang} code.\n"
+        f"Use {target_lang} best practices and conventions.\n"
+        "Map data structures and idioms to the target language equivalents.\n\n"
+        "IMPORTANT: Respond with ONLY the raw code. "
+        "DO NOT wrap your response in ``` or any other markdown formatting. "
+        "DO NOT add any explanatory text before or after the code.\n\n"
+        f"{code}"
+    )
+    try:
+        client = get_groq_client()
+        raw_response = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+        resp = clean_ai_response(raw_response, output_lang_tag)
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+
+    compare_prompt = (
+        f"Here are two versions of code. The first is {source_lang} and the second is the {target_lang} conversion. "
+        "Provide a bullet-point list explaining the key changes made during conversion.\n"
+        f"{source_lang} Code:\n{code}\n{target_lang} Code:\n{resp}"
+    )
+    try:
+        explanation_system_prompt = (
+            f"You are a helpful assistant that explains {source_lang} to {target_lang} conversion changes clearly and concisely. "
+            f"Provide a bullet-point list of key conversion changes. "
+            "Focus on language-specific differences, idiom mappings, and best practices applied. "
+            "Provide no more than 10 bullet points. Be specific and technical."
+        )
+        compare = groq_request_with_retry(
+            client=client,
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": explanation_system_prompt},
+                {"role": "user", "content": compare_prompt},
+            ],
+            temperature=0.4
+        )
+        time.sleep(1)
+    except Exception as e:
+        raise RuntimeError(f"Groq request failed: {e}") from e
+    return (resp, compare)
+
+
+# Mode configuration: maps mode string to (source_lang, target_lang, output_language_for_security)
+CONVERSION_MODES = {
+    "java2py":   ("Java", "Python", "python"),
+    "py2java":   ("Python", "Java", "java"),
+    "cpp2py":    ("C++", "Python", "python"),
+    "js2py":     ("JavaScript", "Python", "python"),
+    "ts2py":     ("TypeScript", "Python", "python"),
+    "cs2py":     ("C#", "Python", "python"),
+    "rb2py":     ("Ruby", "Python", "python"),
+}
+
+
 def convert_code_str(code_str, mode, filename="code", model_name=None):
     """
     Convert code between languages based on the specified mode.
-    Modes: 'java2py' (Java to Python), 'py2java' (Python to Java)
     Returns (converted_code, explanation, security_issues)
     """
     if not code_str.strip():
@@ -508,15 +585,19 @@ def convert_code_str(code_str, mode, filename="code", model_name=None):
         raise ValueError(f"Input encoding error: {str(e)}")
     
     try:
+        # Use existing specialized functions for Java conversions (they have tailored prompts)
         if mode == "java2py":
             converted_code, explanation = ai_convert_java_to_python(code_str, model_name)
-            # Security check on the output Python code
             security_issues = ai_security_check(converted_code, filename, model_name, language="python")
             return converted_code, explanation, security_issues
         elif mode == "py2java":
             converted_code, explanation = ai_convert_python_to_java(code_str, model_name)
-            # Security check on the output Java code
             security_issues = ai_security_check(converted_code, filename, model_name, language="java")
+            return converted_code, explanation, security_issues
+        elif mode in CONVERSION_MODES:
+            source_lang, target_lang, sec_lang = CONVERSION_MODES[mode]
+            converted_code, explanation = ai_convert_generic(code_str, source_lang, target_lang, model_name)
+            security_issues = ai_security_check(converted_code, filename, model_name, language=sec_lang)
             return converted_code, explanation, security_issues
         else:
             raise ValueError(f"Unsupported conversion mode: {mode}")

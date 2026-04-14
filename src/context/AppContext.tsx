@@ -56,7 +56,7 @@ export interface WorkspaceState {
   isConverting: boolean;
   showSummary: boolean;
   fileExplanations?: Record<string, string>; // Store file-specific explanations
-  conversionMode: 'py2to3' | 'java2py' | 'py2java';
+  conversionMode: 'py2to3' | 'java2py' | 'py2java' | 'cpp2py' | 'js2py' | 'ts2py' | 'cs2py' | 'rb2py';
 }
 
 // Define available AI models
@@ -144,11 +144,7 @@ const availableModels: AIModel[] = [
   },
   {
     id: 'mixtral-8x7b-32768',
-<<<<<<< HEAD
-    name: 'Mixtral 8x7B', 
-=======
     name: 'Mixtral 8x7B',
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
     description: 'Great balance of speed and accuracy'
   },
   {
@@ -160,7 +156,17 @@ const availableModels: AIModel[] = [
 
 // Create the provider component
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [reports, setReports] = useState<Report[]>([]);
+  const [reports, setReports] = useState<Report[]>(() => {
+    try {
+      const saved = localStorage.getItem('coderenew_reports');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Rehydrate Date objects from ISO strings
+        return parsed.map((r: any) => ({ ...r, timestamp: new Date(r.timestamp) }));
+      }
+    } catch {}
+    return [];
+  });
   const [apiConnectivity, setApiConnectivity] = useState<ApiConnectivity>(() => {
     // Load userConfigured state from localStorage on initialization
     try {
@@ -186,7 +192,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return initialGitHubConnectivity;
     }
   });
-  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(initialWorkspaceState);
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(() => {
+    try {
+      const saved = localStorage.getItem('coderenew_workspaceState');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Always reset transient flags on reload
+        return { ...initialWorkspaceState, ...parsed, isConverting: false, showSummary: false };
+      }
+    } catch {}
+    return initialWorkspaceState;
+  });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     // Load selected model from localStorage on initialization
     try {
@@ -194,19 +210,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (savedSettings) {
         const settings = JSON.parse(savedSettings);
         const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
-<<<<<<< HEAD
-                       settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' : 
-                       settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
-                       settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
-                       'llama-3.3-70b-versatile';
-        
-=======
           settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
             settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
               settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
                 'llama-3.3-70b-versatile';
 
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
         // Migration: If user had no explicit model selection, default to Llama 3.3 70B
         if (!settings.aiModel) {
           settings.aiModel = 'Llama 3.3 70B';
@@ -243,7 +251,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setApiConnectivity(prev => ({ ...prev, isChecking: true, error: null }));
 
     try {
-      const response = await fetch('http://localhost:5000/api/health');
+      const response = await fetch('http://127.0.0.1:5000/api/health');
       const data = await response.json();
 
       if (response.ok) {
@@ -279,7 +287,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setgitHubConnectivity(prev => ({ ...prev, isChecking: true, error: null }));
 
     try {
-      const response = await fetch('http://localhost:5000/api/github/health');
+      const response = await fetch('http://127.0.0.1:5000/api/github/health');
       const data = await response.json();
 
       if (response.ok) {
@@ -311,7 +319,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const saveApiKey = useCallback(async (apiKey: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:5000/api/save', {
+      const response = await fetch('http://127.0.0.1:5000/api/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -327,11 +335,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (response.ok && data.status === 'success') {
         // Mark as user configured and save to localStorage
         localStorage.setItem('legacyCodeModernizer_groqConfigured', 'true');
-<<<<<<< HEAD
-        
-=======
 
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
         // Update state with userConfigured flag and then check connectivity
         setApiConnectivity(prev => ({
           ...prev,
@@ -357,7 +361,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const saveGitHubToken = useCallback(async (token: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:5000/api/gitsave', {
+      const response = await fetch('http://127.0.0.1:5000/api/gitsave', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -399,7 +403,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteApiKey = useCallback(async (provider: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:5000/api/delete', {
+      const response = await fetch('http://127.0.0.1:5000/api/delete', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -437,7 +441,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteGitHubToken = useCallback(async (provider: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:5000/api/gitdelete', {
+      const response = await fetch('http://127.0.0.1:5000/api/gitdelete', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -478,6 +482,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const clearWorkspaceState = () => {
     setWorkspaceState(initialWorkspaceState);
+    localStorage.removeItem('coderenew_workspaceState');
   };
 
   const updateSelectedModel = (modelId: string) => {
@@ -489,19 +494,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // Convert modelId back to display format for localStorage
       const displayModel = modelId === 'llama-3.3-70b-versatile' ? 'Llama 3.3 70B' :
-<<<<<<< HEAD
-                          modelId === 'llama-3.1-8b-instant' ? 'Llama 3.1 8B' :
-                          modelId === 'mixtral-8x7b-32768' ? 'Mixtral 8x7B' :
-                          modelId === 'gemma2-9b-it' ? 'Gemma 2 9B' :
-                          'Llama 3.3 70B';
-      
-=======
         modelId === 'llama-3.1-8b-instant' ? 'Llama 3.1 8B' :
           modelId === 'mixtral-8x7b-32768' ? 'Mixtral 8x7B' :
             modelId === 'gemma2-9b-it' ? 'Gemma 2 9B' :
               'Llama 3.3 70B';
 
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
       settings.aiModel = displayModel;
       localStorage.setItem('legacyCodeModernizer_settings', JSON.stringify(settings));
 
@@ -513,6 +510,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const latestReport = reports.length > 0 ? reports[0] : null;
+
+  // Persist reports to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('coderenew_reports', JSON.stringify(reports));
+    } catch (e) {
+      console.warn('Could not persist reports to localStorage:', e);
+    }
+  }, [reports]);
+
+  // Persist workspaceState (excluding transient flags) whenever it changes
+  useEffect(() => {
+    try {
+      const { isConverting, showSummary, ...persistable } = workspaceState;
+      localStorage.setItem('coderenew_workspaceState', JSON.stringify(persistable));
+    } catch (e) {
+      console.warn('Could not persist workspaceState to localStorage:', e);
+    }
+  }, [workspaceState]);
 
   // Check API connectivity on app startup if user has configured it
   useEffect(() => {
@@ -545,17 +561,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const settings = event.detail;
       if (settings.aiModel) {
         const modelId = settings.aiModel === 'Llama 3.3 70B' ? 'llama-3.3-70b-versatile' :
-<<<<<<< HEAD
-                       settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' : 
-                       settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
-                       settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
-                       'llama-3.3-70b-versatile';
-=======
           settings.aiModel === 'Llama 3.1 8B' ? 'llama-3.1-8b-instant' :
             settings.aiModel === 'Mixtral 8x7B' ? 'mixtral-8x7b-32768' :
               settings.aiModel === 'Gemma 2 9B' ? 'gemma2-9b-it' :
                 'llama-3.3-70b-versatile';
->>>>>>> 21b6dea (feat: implement clone and convert functionality)
         setSelectedModel(modelId);
       }
     };
