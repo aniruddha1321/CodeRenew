@@ -164,7 +164,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // Rehydrate Date objects from ISO strings
         return parsed.map((r: any) => ({ ...r, timestamp: new Date(r.timestamp) }));
       }
-    } catch {}
+    } catch { /* ignore parse errors */ }
     return [];
   });
   const [apiConnectivity, setApiConnectivity] = useState<ApiConnectivity>(() => {
@@ -200,7 +200,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // Always reset transient flags on reload
         return { ...initialWorkspaceState, ...parsed, isConverting: false, showSummary: false };
       }
-    } catch {}
+    } catch { /* ignore parse errors */ }
     return initialWorkspaceState;
   });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -490,7 +490,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Also update localStorage settings to keep them in sync
     try {
       const savedSettings = localStorage.getItem('legacyCodeModernizer_settings');
-      let settings = savedSettings ? JSON.parse(savedSettings) : {};
+      const settings = savedSettings ? JSON.parse(savedSettings) : {};
 
       // Convert modelId back to display format for localStorage
       const displayModel = modelId === 'llama-3.3-70b-versatile' ? 'Llama 3.3 70B' :

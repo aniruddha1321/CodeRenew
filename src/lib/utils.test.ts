@@ -12,7 +12,8 @@ describe("cn", () => {
   });
 
   it("ignores falsey class inputs", () => {
-    const result = cn("font-bold", undefined, false && "hidden", null);
+    const showHidden = false;
+    const result = cn("font-bold", undefined, showHidden && "hidden", null);
     expect(result).toBe("font-bold");
   });
 });
