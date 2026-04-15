@@ -1,4 +1,4 @@
-from backend.api import app
+from api import app
 
 
 def test_health_endpoint_returns_json():
