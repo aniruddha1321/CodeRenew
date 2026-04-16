@@ -1,6 +1,8 @@
 from flask import Flask, redirect, request, jsonify
 from flask_cors import CORS
 import requests
+import os
+import time
 from translate import migrate_code_str, convert_code_str
 from clone_convert import clone_repo, scan_files, bulk_convert, push_branch, cleanup_clone
 from knowledge_graph import build_knowledge_graph
@@ -580,6 +582,165 @@ def scan_directory():
         "files": files,
         "total": len(files),
     })
+
+
+# ─── Security Scan Endpoints ───
+
+@app.route("/api/security/scan-files", methods=["POST"])
+def security_scan_files():
+    """Standalone security scan for uploaded files (no conversion)."""
+    data = request.get_json()
+    files = data.get("files", {})  # { "filename": "code content", ... }
+    model = data.get("model")
+
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
+
+    from security_check import ai_security_check
+    from database import save_file_scan
+
+    results = {}
+    for filename, code in files.items():
+        if not code.strip():
+            results[filename] = []
+            continue
+
+        ext = os.path.splitext(filename)[1].lower()
+        language = "java" if ext == ".java" else "python"
+
+        try:
+            issues = ai_security_check(code, filename, model, language)
+            results[filename] = issues
+        except Exception as e:
+            results[filename] = [{"error": str(e)}]
+
+        time.sleep(1)  # Rate limit
+
+    # Save to DB
+    scan_id = save_file_scan(list(files.keys()), results, scan_type="standalone")
+
+    # Build summary
+    all_issues = [i for issues in results.values() for i in issues if "error" not in i]
+    summary = {
+        "total_issues": len(all_issues),
+        "high": sum(1 for i in all_issues if i.get("severity") == "high"),
+        "medium": sum(1 for i in all_issues if i.get("severity") == "medium"),
+        "low": sum(1 for i in all_issues if i.get("severity") == "low"),
+    }
+
+    return jsonify({
+        "success": True,
+        "scan_id": scan_id,
+        "results": results,
+        "summary": summary,
+    })
+
+
+@app.route("/api/security/scan-repo", methods=["POST"])
+def security_scan_repo():
+    """Start a repo security audit (runs in background)."""
+    data = request.get_json()
+    repo_url = data.get("repo_url", "").strip()
+    model = data.get("model")
+
+    if not repo_url:
+        return jsonify({"error": "repo_url is required"}), 400
+
+    from repo_audit import start_repo_audit
+    result = start_repo_audit(repo_url, model)
+
+    if result.get("success"):
+        return jsonify(result), 200
+    return jsonify(result), 400
+
+
+@app.route("/api/security/audit-status", methods=["GET"])
+def security_audit_status():
+    """Get current status/progress of a repo audit."""
+    audit_id = request.args.get("audit_id", "").strip()
+    if not audit_id:
+        return jsonify({"error": "audit_id is required"}), 400
+
+    from repo_audit import get_audit_status
+    result = get_audit_status(audit_id)
+
+    if result.get("success"):
+        return jsonify(result), 200
+    return jsonify(result), 404
+
+
+@app.route("/api/security/schedule-audit", methods=["POST"])
+def security_schedule_audit():
+    """Schedule a recurring repo audit."""
+    data = request.get_json()
+    repo_url = data.get("repo_url", "").strip()
+    interval = data.get("interval", "weekly")
+    model = data.get("model")
+
+    if not repo_url:
+        return jsonify({"error": "repo_url is required"}), 400
+
+    from repo_audit import schedule_repo_audit
+    result = schedule_repo_audit(repo_url, interval, model)
+
+    if result.get("success"):
+        return jsonify(result), 200
+    return jsonify(result), 400
+
+
+@app.route("/api/security/cancel-schedule", methods=["POST"])
+def security_cancel_schedule():
+    """Cancel a scheduled audit."""
+    data = request.get_json()
+    schedule_id = data.get("schedule_id", "").strip()
+
+    if not schedule_id:
+        return jsonify({"error": "schedule_id is required"}), 400
+
+    from repo_audit import cancel_schedule
+    result = cancel_schedule(schedule_id)
+
+    if result.get("success"):
+        return jsonify(result), 200
+    return jsonify(result), 404
+
+
+@app.route("/api/security/history", methods=["GET"])
+def security_history():
+    """Get scan and audit history."""
+    scan_type = request.args.get("type", "all")  # "files", "repos", "all"
+
+    from database import get_file_scan_history, get_repo_audit_history
+
+    result = {}
+    if scan_type in ("files", "all"):
+        result["file_scans"] = get_file_scan_history()
+    if scan_type in ("repos", "all"):
+        result["repo_audits"] = get_repo_audit_history()
+
+    return jsonify({"success": True, **result})
+
+
+@app.route("/api/security/scan-detail", methods=["GET"])
+def security_scan_detail():
+    """Get full details of a file scan."""
+    scan_id = request.args.get("scan_id", "").strip()
+    if not scan_id:
+        return jsonify({"error": "scan_id is required"}), 400
+
+    from database import get_file_scan_detail
+    detail = get_file_scan_detail(scan_id)
+    if detail:
+        return jsonify({"success": True, **detail}), 200
+    return jsonify({"error": "Scan not found"}), 404
+
+
+@app.route("/api/security/schedules", methods=["GET"])
+def security_schedules():
+    """Get active scheduled audits."""
+    from database import get_schedules
+    schedules = get_schedules(active_only=True)
+    return jsonify({"success": True, "schedules": schedules})
 
 
 # ─── Chatbot Endpoint ───

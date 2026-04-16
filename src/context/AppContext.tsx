@@ -11,6 +11,8 @@ export interface Report {
   explanation: string;
   securityIssues: SecurityIssue[];
   filesCount?: number; // Track actual number of files converted (for consolidated reports)
+  originalFilename?: string; // Original file name before conversion
+  conversionMode?: string; // Conversion mode used (e.g., 'py2to3', 'java2py')
 }
 
 // Define the shape of a security issue
