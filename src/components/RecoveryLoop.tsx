@@ -90,6 +90,8 @@ const RecoveryLoop: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const eventsEndRef = useRef<HTMLDivElement>(null);
+  const eventsContainerRef = useRef<HTMLDivElement>(null);
+  const isPinnedToBottom = useRef(true);
 
   // Poll for status updates
   const fetchStatus = useCallback(async () => {
@@ -149,8 +151,11 @@ const RecoveryLoop: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchEvents, fetchIssues]);
 
+  // Smart auto-scroll: only scroll to bottom if user is already near the bottom
   useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = eventsContainerRef.current;
+    if (!container || !isPinnedToBottom.current) return;
+    container.scrollTop = container.scrollHeight;
   }, [events]);
 
   // Auto-select first monitor
@@ -494,7 +499,7 @@ const RecoveryLoop: React.FC = () => {
 
       {/* Monitors List + Detail */}
       {monitors.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)] gap-6 items-start">
           {/* Left: Monitor list */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
@@ -542,9 +547,9 @@ const RecoveryLoop: React.FC = () => {
 
           {/* Right: Monitor detail */}
           {activeMonitor && (
-            <div className="lg:col-span-2 space-y-4">
+            <div className="space-y-4 min-w-0">
               {/* Stats cards */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                 <div className="bg-white rounded-xl border p-4 text-center">
                   <Eye size={18} className="mx-auto text-blue-500 mb-1" />
                   <div className="text-xl font-bold text-slate-800">
@@ -576,8 +581,8 @@ const RecoveryLoop: React.FC = () => {
               </div>
 
               {/* Controls */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 text-sm text-slate-600">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-slate-600 min-w-0">
                   <span className="font-medium">{activeMonitor.repo_name}</span>
                   <span className="mx-2 text-slate-300">|</span>
                   <span className="text-slate-400">
@@ -592,27 +597,29 @@ const RecoveryLoop: React.FC = () => {
                     {activeMonitor.auto_fix ? "Auto-fix ON" : "Auto-fix OFF"}
                   </span>
                 </div>
-                <button
-                  onClick={() => handleScanNow(activeMonitor.monitor_id)}
-                  disabled={isScanning || activeMonitor.status !== "active"}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs font-medium transition-colors"
-                >
-                  <RefreshCw size={13} className={isScanning ? "animate-spin" : ""} />
-                  Scan Now
-                </button>
-                {activeMonitor.status === "active" ? (
+                <div className="flex items-center gap-2 self-start sm:self-auto">
                   <button
-                    onClick={() => handleStop(activeMonitor.monitor_id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors"
+                    onClick={() => handleScanNow(activeMonitor.monitor_id)}
+                    disabled={isScanning || activeMonitor.status !== "active"}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-xs font-medium transition-colors"
                   >
-                    <Square size={13} />
-                    Stop
+                    <RefreshCw size={13} className={isScanning ? "animate-spin" : ""} />
+                    Scan Now
                   </button>
-                ) : (
-                  <span className="px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg text-xs font-medium">
-                    Stopped
-                  </span>
-                )}
+                  {activeMonitor.status === "active" ? (
+                    <button
+                      onClick={() => handleStop(activeMonitor.monitor_id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors"
+                    >
+                      <Square size={13} />
+                      Stop
+                    </button>
+                  ) : (
+                    <span className="px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg text-xs font-medium">
+                      Stopped
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Event Log */}
@@ -626,7 +633,16 @@ const RecoveryLoop: React.FC = () => {
                     {events.length} event(s)
                   </span>
                 </div>
-                <div className="max-h-96 overflow-y-auto p-3 space-y-1.5">
+                <div
+                  ref={eventsContainerRef}
+                  className="max-h-96 overflow-y-auto p-3 space-y-1.5"
+                  onScroll={() => {
+                    const el = eventsContainerRef.current;
+                    if (!el) return;
+                    // Consider "pinned" if within 60px of the bottom
+                    isPinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+                  }}
+                >
                   {events.length === 0 ? (
                     <p className="text-sm text-slate-500 text-center py-8">
                       No events yet. Start monitoring to see activity.

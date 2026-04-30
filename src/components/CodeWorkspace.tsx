@@ -1149,20 +1149,26 @@ const CodeWorkspace: React.FC = () => {
             </div>
 
             {/* Mode Selector */}
-            <select
-              value={workspaceState.conversionMode}
-              onChange={(e) => updateWorkspaceState({ conversionMode: e.target.value as WorkspaceState['conversionMode'] })}
-              className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            >
-              <option value="py2to3">Python 2 → Python 3</option>
-              <option value="java2py">Java → Python</option>
-              <option value="py2java">Python → Java</option>
-              <option value="cpp2py">C++ → Python</option>
-              <option value="js2py">JavaScript → Python</option>
-              <option value="ts2py">TypeScript → Python</option>
-              <option value="cs2py">C# → Python</option>
-              <option value="rb2py">Ruby → Python</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">Mode</span>
+              <div className="relative">
+                <select
+                  value={workspaceState.conversionMode}
+                  onChange={(e) => updateWorkspaceState({ conversionMode: e.target.value as WorkspaceState['conversionMode'] })}
+                  className="appearance-none pl-3 pr-8 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
+                >
+                  <option value="py2to3">Python 2 to 3</option>
+                  <option value="java2py">Java to Python</option>
+                  <option value="py2java">Python to Java</option>
+                  <option value="cpp2py">C++ to Python</option>
+                  <option value="js2py">JavaScript to Python</option>
+                  <option value="ts2py">TypeScript to Python</option>
+                  <option value="cs2py">C# to Python</option>
+                  <option value="rb2py">Ruby to Python</option>
+                </select>
+                <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            </div>
 
             {/* Actions */}
             <div className="flex items-center gap-2">

@@ -67,6 +67,26 @@ def init_db():
             next_run TEXT,
             last_audit_id TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS recovery_sessions (
+            monitor_id TEXT PRIMARY KEY,
+            repo_url TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            repo_path TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            started_at TEXT NOT NULL,
+            stopped_at TEXT,
+            poll_interval INTEGER DEFAULT 300,
+            model TEXT,
+            auto_fix INTEGER DEFAULT 1,
+            scans_completed INTEGER DEFAULT 0,
+            issues_found INTEGER DEFAULT 0,
+            issues_fixed INTEGER DEFAULT 0,
+            prs_created INTEGER DEFAULT 0,
+            events_json TEXT DEFAULT '[]',
+            issues_json TEXT DEFAULT '[]',
+            baseline_hashes_json TEXT DEFAULT '{}'
+        );
     """)
     conn.commit()
     conn.close()
@@ -320,6 +340,84 @@ def update_schedule_last_run(schedule_id: str, audit_id: str, interval: str):
         "UPDATE scheduled_audits SET last_run = ?, next_run = ?, last_audit_id = ? WHERE id = ?",
         (now.isoformat(), next_run, audit_id, schedule_id)
     )
+    conn.commit()
+    conn.close()
+
+
+# ─── Recovery Sessions ───
+
+def save_recovery_session(monitor: dict):
+    """Insert or update a recovery monitor session."""
+    conn = _get_conn()
+    stats = monitor.get('stats', {})
+    conn.execute(
+        """INSERT OR REPLACE INTO recovery_sessions
+           (monitor_id, repo_url, repo_name, repo_path, status, started_at, stopped_at,
+            poll_interval, model, auto_fix, scans_completed, issues_found, issues_fixed,
+            prs_created, events_json, issues_json, baseline_hashes_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            monitor['monitor_id'],
+            monitor['repo_url'],
+            monitor['repo_name'],
+            monitor['repo_path'],
+            monitor['status'],
+            monitor['started_at'],
+            monitor.get('stopped_at'),
+            monitor['poll_interval'],
+            monitor['model'],
+            1 if monitor.get('auto_fix') else 0,
+            stats.get('scans_completed', 0),
+            stats.get('issues_found', 0),
+            stats.get('issues_fixed', 0),
+            stats.get('prs_created', 0),
+            json.dumps(monitor.get('events', [])[-200:]),
+            json.dumps(monitor.get('issues', [])),
+            json.dumps(monitor.get('baseline_hashes', {})),
+        )
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_recovery_sessions() -> list[dict]:
+    """Load all recovery sessions from the database."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM recovery_sessions ORDER BY started_at DESC"
+    ).fetchall()
+    conn.close()
+
+    sessions = []
+    for r in rows:
+        sessions.append({
+            'monitor_id': r['monitor_id'],
+            'repo_url': r['repo_url'],
+            'repo_name': r['repo_name'],
+            'repo_path': r['repo_path'],
+            'status': r['status'],
+            'started_at': r['started_at'],
+            'stopped_at': r['stopped_at'],
+            'poll_interval': r['poll_interval'],
+            'model': r['model'],
+            'auto_fix': bool(r['auto_fix']),
+            'stats': {
+                'scans_completed': r['scans_completed'],
+                'issues_found': r['issues_found'],
+                'issues_fixed': r['issues_fixed'],
+                'prs_created': r['prs_created'],
+            },
+            'events': json.loads(r['events_json'] or '[]'),
+            'issues': json.loads(r['issues_json'] or '[]'),
+            'baseline_hashes': json.loads(r['baseline_hashes_json'] or '{}'),
+        })
+    return sessions
+
+
+def delete_recovery_session(monitor_id: str):
+    """Remove a recovery session from the database."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM recovery_sessions WHERE monitor_id = ?", (monitor_id,))
     conn.commit()
     conn.close()
 

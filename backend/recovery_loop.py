@@ -27,6 +27,7 @@ import git
 from clone_convert import clone_repo, scan_files, bulk_convert, cleanup_clone, _safe_rmtree
 from security_check import ai_security_check
 from translate import migrate_code_str, fetch_api_key
+from database import save_recovery_session, load_recovery_sessions, delete_recovery_session
 
 
 # ─── In-memory store for monitored repos and their events ───
@@ -38,6 +39,39 @@ _stop_events: dict[str, threading.Event] = {}
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _bootstrap_from_db():
+    """
+    Load previously saved sessions from SQLite on startup.
+    Active sessions are marked stopped (polling threads cannot be recovered).
+    Stopped sessions load as-is so history is visible immediately.
+    """
+    try:
+        sessions = load_recovery_sessions()
+    except Exception:
+        return
+
+    for session in sessions:
+        mid = session['monitor_id']
+        if session['status'] == 'active':
+            session['status'] = 'stopped'
+            session.setdefault('stopped_at', _now_iso())
+            session['events'].append({
+                'id': str(uuid.uuid4())[:8],
+                'timestamp': _now_iso(),
+                'level': 'info',
+                'message': 'Monitoring paused – backend was restarted. Re-start monitoring to resume.',
+            })
+            save_recovery_session(session)
+        _monitored_repos[mid] = session
+        _repo_locks[mid] = threading.Lock()
+        _stop_events[mid] = threading.Event()
+        _stop_events[mid].set()
+
+
+# Load persisted sessions on module import
+_bootstrap_from_db()
 
 
 def _file_hash(filepath: str) -> str:
@@ -196,6 +230,9 @@ def start_monitoring(
     _repo_locks[monitor_id] = threading.Lock()
     _stop_events[monitor_id] = threading.Event()
 
+    # Persist immediately so it survives a backend restart
+    save_recovery_session(monitor)
+
     # Run initial scan immediately
     _add_event(monitor_id, "info", "Monitoring started – running initial scan")
     _run_single_scan(monitor_id)
@@ -223,6 +260,7 @@ def stop_monitoring(monitor_id: str) -> dict:
     monitor["status"] = "stopped"
     monitor["stopped_at"] = _now_iso()
     _add_event(monitor_id, "info", "Monitoring stopped by user")
+    save_recovery_session(monitor)
 
     return {"success": True, "monitor_id": monitor_id, "message": "Monitoring stopped"}
 
@@ -321,6 +359,11 @@ def _add_event(monitor_id: str, level: str, message: str, data: dict | None = No
     if data:
         event["data"] = data
     monitor["events"].append(event)
+    # Persist after every event so nothing is lost on restart
+    try:
+        save_recovery_session(monitor)
+    except Exception:
+        pass
 
 
 def _poll_loop(monitor_id: str):

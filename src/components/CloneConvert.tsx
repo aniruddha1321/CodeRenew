@@ -43,32 +43,43 @@ interface ConvertedFile {
     error?: string;
 }
 
+const STORAGE_KEY = "coderenew_cloneconvert_state";
+
+function loadPersistedState() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+}
+
 const CloneConvert: React.FC = () => {
     const navigate = useNavigate();
     const { selectedModel, apiConnectivity } = useAppContext();
 
+    const persisted = loadPersistedState();
+
     // Wizard state
-    const [step, setStep] = useState<WizardStep>("input");
-    const [repoUrl, setRepoUrl] = useState("");
-    const [repoName, setRepoName] = useState("");
-    const [repoPath, setRepoPath] = useState("");
-    const [defaultBranch, setDefaultBranch] = useState("main");
-    const [conversionMode, setConversionMode] = useState<"py2to3" | "java2py" | "py2java">("py2to3");
+    const [step, setStep] = useState<WizardStep>(persisted?.step ?? "input");
+    const [repoUrl, setRepoUrl] = useState(persisted?.repoUrl ?? "");
+    const [repoName, setRepoName] = useState(persisted?.repoName ?? "");
+    const [repoPath, setRepoPath] = useState(persisted?.repoPath ?? "");
+    const [defaultBranch, setDefaultBranch] = useState(persisted?.defaultBranch ?? "main");
+    const [conversionMode, setConversionMode] = useState<"py2to3" | "java2py" | "py2java">(persisted?.conversionMode ?? "py2to3");
 
     // File state
-    const [scannedFiles, setScannedFiles] = useState<ScannedFile[]>([]);
-    const [pythonCount, setPythonCount] = useState(0);
-    const [javaCount, setJavaCount] = useState(0);
+    const [scannedFiles, setScannedFiles] = useState<ScannedFile[]>(persisted?.scannedFiles ?? []);
+    const [pythonCount, setPythonCount] = useState(persisted?.pythonCount ?? 0);
+    const [javaCount, setJavaCount] = useState(persisted?.javaCount ?? 0);
 
     // Conversion state
-    const [convertedFiles, setConvertedFiles] = useState<ConvertedFile[]>([]);
-    const [convertProgress, setConvertProgress] = useState(0);
-    const [convertTotal, setConvertTotal] = useState(0);
+    const [convertedFiles, setConvertedFiles] = useState<ConvertedFile[]>(persisted?.convertedFiles ?? []);
+    const [convertProgress, setConvertProgress] = useState(persisted?.convertProgress ?? 0);
+    const [convertTotal, setConvertTotal] = useState(persisted?.convertTotal ?? 0);
 
     // Push state
-    const [branchName, setBranchName] = useState("modernized-code");
-    const [commitMessage, setCommitMessage] = useState("Automated code conversion by Code Renew");
-    const [prUrl, setPrUrl] = useState<string | null>(null);
+    const [branchName, setBranchName] = useState(persisted?.branchName ?? "modernized-code");
+    const [commitMessage, setCommitMessage] = useState(persisted?.commitMessage ?? "Automated code conversion by Code Renew");
+    const [prUrl, setPrUrl] = useState<string | null>(persisted?.prUrl ?? null);
     const [isPushing, setIsPushing] = useState(false);
 
     // Knowledge graph state
@@ -78,6 +89,22 @@ const CloneConvert: React.FC = () => {
 
     // Loading states
     const [isCloning, setIsCloning] = useState(false);
+
+    // Persist wizard state to localStorage whenever key state changes
+    useEffect(() => {
+        try {
+            const toSave = {
+                step, repoUrl, repoName, repoPath, defaultBranch, conversionMode,
+                scannedFiles, pythonCount, javaCount,
+                convertedFiles, convertProgress, convertTotal,
+                branchName, commitMessage, prUrl,
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+        } catch { /* ignore quota errors */ }
+    }, [step, repoUrl, repoName, repoPath, defaultBranch, conversionMode,
+        scannedFiles, pythonCount, javaCount,
+        convertedFiles, convertProgress, convertTotal,
+        branchName, commitMessage, prUrl]);
 
     const handleClone = async () => {
         if (!repoUrl.trim()) {
@@ -222,6 +249,8 @@ const CloneConvert: React.FC = () => {
         setPrUrl(null);
         setShowGraph(false);
         setGraphData(null);
+        // Clear persisted state
+        try { localStorage.removeItem(STORAGE_KEY); } catch { }
     };
 
     // Step indicator
@@ -308,16 +337,19 @@ const CloneConvert: React.FC = () => {
 
                         {/* Conversion Mode Selector */}
                         <div className="mt-6 flex items-center gap-3">
-                            <label className="text-sm font-medium text-gray-700">Conversion Mode:</label>
-                            <select
-                                value={conversionMode}
-                                onChange={e => setConversionMode(e.target.value as any)}
-                                className="text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500"
-                            >
-                                <option value="py2to3">Python 2 → Python 3</option>
-                                <option value="java2py">Java → Python</option>
-                                <option value="py2java">Python → Java</option>
-                            </select>
+                            <label className="text-sm font-medium text-gray-500 uppercase tracking-wider">Mode</label>
+                            <div className="relative">
+                                <select
+                                    value={conversionMode}
+                                    onChange={e => setConversionMode(e.target.value as any)}
+                                    className="appearance-none pl-3 pr-8 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
+                                >
+                                    <option value="py2to3">Python 2 to 3</option>
+                                    <option value="java2py">Java to Python</option>
+                                    <option value="py2java">Python to Java</option>
+                                </select>
+                                <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                            </div>
                         </div>
                     </div>
                 )}

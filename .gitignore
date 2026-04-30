@@ -37,3 +37,5 @@ venv/
 
 # Rust (backend/api_manager)
 /backend/api_manager/target/
+
+report
