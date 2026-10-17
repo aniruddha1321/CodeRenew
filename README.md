@@ -1,269 +1,287 @@
-# CodeRenew
+﻿# CodeRenew
 
-## Overview
+AI-powered desktop application for modernizing legacy codebases. Built with React + TypeScript (Electron) frontend and a Python Flask backend powered by **Vertex AI (Gemini 1.5 Pro)** on Google Cloud.
 
-**CodeRenew** is an AI-powered desktop application for modernizing legacy codebases. It performs multi-language code conversion, comprehensive security analysis with persistent history, audits entire GitHub repositories for vulnerabilities, and includes a **Recovery Loop** agent that continuously monitors customer repositories — automatically detecting issues and creating pull requests with fixes.
+Submitted for: **Google Cloud AI Builder Cup 2025**
 
-## Features
+> All AI inference runs on Vertex AI via Application Default Credentials. No third-party API keys are required.
 
-* **Code Conversion** — AI-powered multi-language code conversion and modernization. Supports Python, Java, C++, JavaScript, TypeScript, C#, and Ruby.
-* **GitHub Clone & Convert** — Clone a GitHub repo, bulk-convert all matching files, and push the result to a new branch.
-* **AI Security Scanner** — Tabbed interface separating:
-  * **File Scan** — Scan individual files from conversions or standalone uploads. Results are persisted in a local SQLite database with full scan history.
-  * **Repo Audit** — Clone and audit entire GitHub repositories for security vulnerabilities. Runs as a background process with real-time progress tracking. Supports scheduled recurring audits (daily/weekly).
-* **Knowledge Graph** — Generates an interactive dependency/relationship graph of a codebase using AI analysis.
-* **Recovery Loop** — Continuous monitoring agent: customers provide repo access, the agent polls for changes, detects legacy patterns and security issues, auto-generates fixes, and opens pull requests automatically.
-* **Dashboard** — Aggregated overview with conversion stats, security severity breakdown (High/Medium/Low bars), standards compliance pills (HIPAA, ISO 27001, General), quick-start actions, recent activity feed, and a full conversion history table.
-* **Summary Report** — Detailed report of all conversion and security findings with export options.
-* **ChatBot** — In-app AI assistant for code-related queries.
-* **SQLite Persistence** — Scan history, repo audit results, and scheduled audit configurations are stored in a local `coderenew.db` database that survives app restarts.
-* **Secure Credential Storage** — API keys and GitHub tokens are stored securely via a Rust-based `api_manager` CLI binary.
+---
 
-## Tech Stack
+## What It Does
 
-| Layer | Technologies |
-|-------|-------------|
-| **Frontend** | [React](https://reactjs.org/) · [TypeScript](https://www.typescriptlang.org/) · [Vite](https://vitejs.dev/) · [Tailwind CSS](https://tailwindcss.com/) · [shadcn/ui](https://ui.shadcn.com/) · [Recharts](https://recharts.org/) |
-| **Backend** | [Flask](https://flask.palletsprojects.com/) · [Python 3](https://www.python.org/) · [Groq API](https://groq.com/) (Llama 3.3 70B, Llama 3.1 8B, Mixtral 8x7B, Gemma2 9B) |
-| **Database** | [SQLite](https://www.sqlite.org/) (local, zero-config persistence) |
-| **Desktop** | [Electron](https://www.electronjs.org/) |
-| **Credential Manager** | [Rust](https://www.rust-lang.org/) CLI (`api_manager`) |
-| **Libraries** | lib2to3 · GitPython · NetworkX · Flask-CORS |
+| Feature | Description |
+|---|---|
+| Code Conversion | Translate code between Python, Java, C++, JavaScript, TypeScript, C#, Ruby |
+| GitHub Clone & Convert | Clone a repo, bulk-convert all matching files, push to a new branch |
+| Security Scanner | File-level scan and full repo audit with severity ratings and fix suggestions |
+| Recovery Loop | Continuous monitoring agent — polls a repo, detects issues, opens PRs automatically |
+| Knowledge Graph | Interactive dependency visualization of a codebase using NetworkX |
+| Dashboard | Conversion stats, security severity breakdown, full scan history |
+| ChatBot | In-app assistant powered by Gemini 1.5 Pro |
 
-## Getting Started
+---
+
+## Quick Start
 
 ### Prerequisites
 
-* **Node.js** (v18+) and npm/bun
-* **Python 3.10+** with pip
-* **Rust & Cargo** (only if rebuilding the `api_manager` binary)
-* A **Groq API key** (free tier available at [console.groq.com](https://console.groq.com))
-* A **GitHub personal access token** (for private repos and PR creation)
+- Python 3.11+
+- Node.js 18+
+- A Google Cloud project with **Vertex AI API enabled**
+- `gcloud` CLI installed and authenticated
+- Git
 
-### Installation
+### 1. Authenticate with Google Cloud
 
-```sh
-# 1. Clone the repository
-git clone https://github.com/kronten28/legacycodemodernizer.git
-cd legacycodemodernizer
+```bash
+gcloud auth application-default login
+gcloud config set project YOUR_GCP_PROJECT_ID
+```
 
-# 2. Install frontend dependencies
+This sets up Application Default Credentials (ADC) so the backend can call Vertex AI without any API key.
+
+### 2. Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+Create a `.env` file in the `backend/` folder:
+
+```env
+GCP_PROJECT=your-gcp-project-id
+GCP_LOCATION=us-central1
+VERTEX_MODEL=gemini-1.5-pro
+FRONTEND_ORIGIN=http://localhost:5173
+```
+
+Start the Flask server:
+
+```bash
+python api.py
+```
+
+The API runs on `http://localhost:5000` by default.
+
+### 3. Frontend (Web Dev Mode)
+
+```bash
 npm install
-
-# 3. Install backend dependencies
-pip install -r backend/requirements.txt
-
-# 4. Start the backend API server
-cd backend && python api.py &
-
-# 5. Start the desktop app (Electron + Vite)
-cd .. && npm run dev
+npm run dev
 ```
 
-### Configuration
+Open `http://localhost:5173` in your browser.
 
-On first launch, go to **Settings** in the app and enter your:
-1. **Groq API Key** — enables AI-powered conversion and security scanning.
-2. **GitHub Token** — enables cloning private repos and creating PRs from the Recovery Loop.
+### 4. Frontend (Electron Desktop App)
 
-Keys are stored locally via the `api_manager` binary and never leave your machine.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│                Electron Desktop                  │
-│  ┌────────────────────────────────────────────┐  │
-│  │   React Frontend (Vite + Tailwind)         │  │
-│  │   ├── Dashboard        (stats + history)   │  │
-│  │   ├── Code Workspace   (convert files)     │  │
-│  │   ├── Clone & Convert  (GitHub repos)      │  │
-│  │   ├── Security Scanner                     │  │
-│  │   │   ├── File Scan    (upload + history)  │  │
-│  │   │   └── Repo Audit   (clone + schedule)  │  │
-│  │   ├── Recovery Loop    (monitor agent)     │  │
-│  │   ├── Knowledge Graph  (dependency viz)    │  │
-│  │   ├── Summary Report   (export PDF/CSV)    │  │
-│  │   ├── Settings         (API keys)          │  │
-│  │   └── ChatBot          (AI assistant)      │  │
-│  └──────────────┬─────────────────────────────┘  │
-│                 │ HTTP (localhost:5000)            │
-│  ┌──────────────▼─────────────────────────────┐  │
-│  │   Flask Backend                            │  │
-│  │   ├── translate.py       (conversion)      │  │
-│  │   ├── security_check.py  (AI scanner)      │  │
-│  │   ├── clone_convert.py   (GitHub ops)      │  │
-│  │   ├── knowledge_graph.py (dep graph)       │  │
-│  │   ├── recovery_loop.py   (monitor agent)   │  │
-│  │   ├── repo_audit.py      (repo scanning)   │  │
-│  │   ├── database.py        (SQLite layer)    │  │
-│  │   └── api_manager/       (Rust creds)      │  │
-│  └──────────┬──────────────┬──────────────────┘  │
-│             │              │                      │
-│  ┌──────────▼──────┐ ┌────▼───────────────────┐  │
-│  │  SQLite (local)  │ │ Groq API (AI Models)   │  │
-│  │  coderenew.db    │ │ Llama 3.3 70B, etc.    │  │
-│  └─────────────────┘ └────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+```bash
+npm install
+npm run build:electron
+npm run electron
 ```
 
-## How It Works
+---
 
-### Code Conversion
-1. **Parse & analyze** — The source code is parsed and analyzed for language patterns and modernization opportunities.
-2. **AI conversion** — The Groq-hosted LLM converts the code to the target language, adds type hints, modernizes idioms, and cleans up artifacts.
-3. **Security scan** — The converted code is analyzed for vulnerabilities with severity ratings and fix suggestions.
+## GCP Services Used
 
-### Security Scanner
+| Service | Purpose |
+|---|---|
+| Vertex AI (Gemini 1.5 Pro) | All AI inference — code conversion, security scanning, chatbot |
+| Cloud Run | Backend deployment (containerized Flask) |
+| Cloud Firestore | Scan history, audit results, conversion records |
+| Cloud Storage | Temporary cloned repository files |
+| Cloud Tasks + Scheduler | Async repo audits and cron-based recurring audits |
+| Secret Manager | GitHub tokens stored securely |
+| Firebase Hosting | React SPA hosting |
+| Cloud Build | CI/CD pipeline |
 
-The Security Scanner has two modes accessible via tabbed navigation:
+---
 
-**File Scan:**
-1. View security findings from the latest conversion automatically.
-2. Or upload standalone files for independent scanning.
-3. Filter by compliance standard (HIPAA, ISO 27001, General).
-4. All results are persisted in SQLite with full history.
+## Project Structure
 
-**Repo Audit:**
-1. Enter a GitHub repository URL to trigger a full security audit.
-2. The backend clones the repo, identifies scannable files, and processes them in a background thread.
-3. Real-time progress is shown via polling (file count, current file, issues found so far).
-4. Issues are grouped by file with severity badges and code recommendations.
-5. Schedule recurring audits (daily/weekly) that run automatically.
+```
+backend/
+    api.py                  Flask API server — all endpoints
+    translate.py            AI code conversion (Vertex AI)
+    security_check.py       AI security scanner (Vertex AI)
+    clone_convert.py        GitHub repo clone and bulk conversion
+    knowledge_graph.py      Dependency graph builder (NetworkX)
+    recovery_loop.py        Continuous monitoring agent
+    repo_audit.py           Background repo security auditing
+    database.py             SQLite persistence layer
+    coderenew.db            SQLite database (auto-created on first run)
+    requirements.txt        Python dependencies
+    tests/
+        conftest.py
+        test_api_smoke.py   Backend smoke tests
+    api_manager/            Rust CLI binary for secure credential storage
+        src/main.rs
+        Cargo.toml
 
-### Recovery Loop
-1. User provides a GitHub repo URL and configures poll interval + auto-fix preference.
-2. The agent clones the repo, builds a file-hash baseline, and runs an initial scan.
-3. A background thread polls for new commits at the configured interval.
-4. On each poll: pulls latest changes, detects modified/new files, runs legacy pattern detection and AI security scanning.
-5. If auto-fix is enabled, the agent generates remediation code via AI and creates a pull request with the fixes.
-6. All activity is streamed to a real-time event log in the frontend.
+src/
+    components/
+        Dashboard.tsx           Stats, security overview, history table
+        CodeWorkspace.tsx       File conversion workspace
+        CloneConvert.tsx        GitHub clone and convert
+        SecurityScanner.tsx     Tabbed container (File Scan / Repo Audit)
+        FileSecurityScan.tsx    File-level scan and history
+        RepoSecurityAudit.tsx   Repo audit and scheduling
+        RecoveryLoop.tsx        Continuous monitoring UI
+        KnowledgeGraph.tsx      Dependency visualization
+        SummaryReport.tsx       Aggregated report
+        Settings.tsx            GCP and GitHub configuration
+        ChatBot.tsx             Gemini-powered assistant
+        Sidebar.tsx             Navigation
+        Layout.tsx              App layout wrapper
+        ApiHealthBadge.tsx      API status indicator
+        ui/                     shadcn/ui base components
+    context/
+        AppContext.tsx           Global state
+    lib/
+        exportUtils.ts          CSV / PDF export
+        utils.ts
+    App.tsx                     Router
+
+electron/
+    main.ts
+    preload.ts
+
+.github/
+    workflows/ci.yml            GitHub Actions CI pipeline
+```
+
+---
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| POST | `/migrate` | Legacy code modernization |
+| GET | `/api/health` | Health check and Vertex AI configuration status |
+| POST | `/migrate` | Legacy code migration and modernization |
 | POST | `/convert` | Multi-language code conversion |
-| POST | `/github/clone` | Clone a GitHub repo |
-| POST | `/github/bulk-convert` | Bulk convert files in a cloned repo |
+| POST | `/github/clone` | Clone a GitHub repository |
+| POST | `/github/bulk-convert` | Bulk convert all matching files in a cloned repo |
 | POST | `/github/push-branch` | Push converted files to a new branch |
-| POST | `/analyze/knowledge-graph` | Generate knowledge graph |
-| POST | `/recovery/start` | Start monitoring a repo |
+| POST | `/analyze/knowledge-graph` | Generate a dependency knowledge graph |
+| POST | `/recovery/start` | Start continuous monitoring on a repo |
 | POST | `/recovery/stop` | Stop monitoring |
-| GET | `/recovery/status` | Get all monitor statuses |
-| GET | `/recovery/events` | Get agent event log |
-| GET | `/recovery/issues` | Get detailed scan issues |
-| POST | `/recovery/scan` | Trigger an immediate scan |
+| GET | `/recovery/status` | Get all active monitor statuses |
+| GET | `/recovery/events` | Get the real-time agent event log |
+| GET | `/recovery/issues` | Get detailed scan issues found by the agent |
+| POST | `/recovery/scan` | Trigger an immediate scan cycle |
 | POST | `/api/security/scan-files` | Standalone file security scan |
-| POST | `/api/security/scan-repo` | Start async repository audit |
-| GET | `/api/security/audit-status` | Poll repo audit progress |
-| POST | `/api/security/schedule-audit` | Schedule recurring audit |
+| POST | `/api/security/scan-repo` | Start an async repository audit |
+| GET | `/api/security/audit-status` | Poll audit progress |
+| POST | `/api/security/schedule-audit` | Schedule a recurring audit (daily/weekly) |
 | POST | `/api/security/cancel-schedule` | Cancel a scheduled audit |
-| GET | `/api/security/history` | Retrieve scan/audit history |
-| GET | `/api/security/scan-detail` | Get full results for a scan |
-| GET | `/api/security/schedules` | List scheduled audits |
+| GET | `/api/security/history` | Retrieve full scan and audit history |
+| GET | `/api/security/scan-detail` | Get full results for a specific scan |
+| GET | `/api/security/schedules` | List all scheduled audits |
+| POST | `/api/chat` | ChatBot powered by Gemini 1.5 Pro |
 
-## Project Structure
+---
 
-```
-├── backend/
-│   ├── api.py                # Flask API server (all endpoints)
-│   ├── translate.py          # AI code conversion
-│   ├── security_check.py     # AI security scanner
-│   ├── clone_convert.py      # GitHub repo operations
-│   ├── knowledge_graph.py    # Dependency graph builder
-│   ├── recovery_loop.py      # Continuous monitoring agent
-│   ├── repo_audit.py         # Background repo security auditing
-│   ├── database.py           # SQLite persistence layer
-│   ├── coderenew.db          # SQLite database (auto-created)
-│   ├── requirements.txt      # Python dependencies
-│   ├── tests/                # Backend test suite
-│   └── api_manager/          # Rust credential manager
-├── src/
-│   ├── components/
-│   │   ├── Dashboard.tsx         # Stats, security overview, history table
-│   │   ├── CodeWorkspace.tsx     # File conversion workspace
-│   │   ├── CloneConvert.tsx      # GitHub clone & convert
-│   │   ├── SecurityScanner.tsx   # Tabbed container (File Scan / Repo Audit)
-│   │   ├── FileSecurityScan.tsx  # File-level scan + history
-│   │   ├── RepoSecurityAudit.tsx # Repo audit + scheduling
-│   │   ├── RecoveryLoop.tsx      # Continuous monitoring UI
-│   │   ├── KnowledgeGraph.tsx    # Dependency visualization
-│   │   ├── SummaryReport.tsx     # Aggregated report
-│   │   ├── Settings.tsx          # API key configuration
-│   │   ├── ChatBot.tsx           # AI assistant
-│   │   ├── Sidebar.tsx           # Navigation sidebar
-│   │   ├── Layout.tsx            # App layout wrapper
-│   │   ├── ApiHealthBadge.tsx    # API status indicator
-│   │   └── ui/                   # shadcn/ui components
-│   ├── context/
-│   │   └── AppContext.tsx        # Global state management
-│   ├── lib/
-│   │   └── exportUtils.ts       # CSV/PDF export utilities
-│   └── App.tsx                   # Router
-├── electron/
-│   ├── main.ts
-│   └── preload.ts
-├── .github/
-│   └── workflows/ci.yml         # CI pipeline
-└── package.json
-```
+## How Each Feature Works
 
-## License
+### Code Conversion
 
-This project is part of an academic submission (8th Semester Final Year Project).
+1. User pastes source code and selects source and target language.
+2. Frontend calls `POST /convert` (or `POST /migrate` for legacy modernization).
+3. Flask calls Vertex AI (Gemini 1.5 Pro) with a structured prompt for code conversion.
+4. Converted code is returned and shown in a split-pane editor.
+5. The converted code is automatically passed to the security scanner.
+6. Security findings are shown with severity ratings and fix suggestions.
 
-## Quality Gates
+### Security Scanner
 
-Run these commands before submission:
+**File Scan mode:**
+- Upload a file or use the output of a conversion.
+- Results are persisted in SQLite with full history.
+- Filter findings by compliance standard: HIPAA, ISO 27001, General.
 
-```sh
-npm run lint
+**Repo Audit mode:**
+- Enter a GitHub repository URL.
+- Backend clones the repo and processes files in a background thread.
+- Real-time progress shown via polling.
+- Issues grouped by file with severity badges and code recommendations.
+- Schedule recurring audits at daily or weekly intervals.
+
+### Recovery Loop
+
+1. User provides a GitHub repo URL, poll interval, and auto-fix preference.
+2. Backend clones the repo, builds a file-hash baseline, and runs an initial scan.
+3. A background thread polls for new commits at the configured interval.
+4. On each poll: pulls latest changes, detects modified files, runs security scanning.
+5. If auto-fix is enabled, Gemini generates remediation code and opens a GitHub PR.
+6. All activity streams to the real-time event log in the frontend.
+
+---
+
+## Running Tests
+
+```bash
+# Frontend tests
 npm run test
+
+# Backend smoke tests
+cd backend
+pytest tests/
+
+# Lint
+npm run lint
+
+# Production build (web)
 npm run build:web
 ```
 
-### Test Coverage Scope
+### What the tests cover
 
-Current automated checks focus on high-signal paths:
+- Frontend: `cn` class merge utility (`src/lib/utils.test.ts`)
+- Backend: `/api/health`, `/convert` (bad input + invalid mode), `/migrate` (bad input)
 
-* Frontend utility behavior (`cn` class merge logic)
-* Backend endpoint contract checks for:
-	* `/api/health`
-	* `/convert` bad input and invalid mode handling
-	* `/migrate` bad input handling
+---
 
 ## CI Pipeline
 
-A GitHub Actions workflow is included at `.github/workflows/ci.yml`.
+GitHub Actions runs on every push and pull request to `main`:
 
-On each push and pull request to `main` or `master`, the pipeline runs:
-
-1. Dependency installation (Node + Python)
+1. Install Node.js and Python dependencies
 2. Lint (`npm run lint`)
 3. Frontend tests (`npm run test:frontend`)
 4. Backend smoke tests (`npm run test:backend`)
-5. Frontend production build (`npm run build:web`)
+5. Production web build (`npm run build:web`)
 
-## Requirement Traceability (Submission Quick View)
+---
 
-| Requirement Area | Implementation Evidence |
-|------------------|-------------------------|
-| Multi-language code modernization | `/migrate`, `/convert` endpoints in `backend/api.py` |
-| Multi-file / repository processing | `/github/clone`, `/github/bulk-convert`, `/github/push-branch` in `backend/api.py` |
-| Security assessment | `backend/security_check.py`, `backend/repo_audit.py`, Security Scanner UI (File Scan + Repo Audit tabs) |
-| Data persistence | `backend/database.py`, SQLite `coderenew.db` for scan history, audit results, schedules |
+## Requirement Traceability
+
+| Requirement | Implementation |
+|---|---|
+| Multi-language code modernization | `/migrate`, `/convert` in `backend/api.py`; `backend/translate.py` (Vertex AI) |
+| Multi-file / repository processing | `/github/clone`, `/github/bulk-convert`, `/github/push-branch` |
+| Security assessment | `backend/security_check.py` (Vertex AI), `backend/repo_audit.py`, Security Scanner UI |
+| Data persistence | `backend/database.py`, SQLite `coderenew.db` |
 | Continuous monitoring agent | `backend/recovery_loop.py`, `/recovery/*` endpoints |
-| Scheduled security auditing | `backend/repo_audit.py`, `/api/security/schedule-audit` endpoint |
+| Scheduled security auditing | `backend/repo_audit.py`, `/api/security/schedule-audit` |
 | Knowledge graph analysis | `backend/knowledge_graph.py`, `/analyze/knowledge-graph` |
-| Desktop productization | Electron entrypoints in `electron/main.ts`, `dist-electron/main.cjs` |
-| Verification and reliability | Test files in `src/lib/utils.test.ts` and `backend/tests/test_api_smoke.py`, CI in `.github/workflows/ci.yml` |
+| Desktop app | Electron entrypoints in `electron/main.ts` |
+| Testing and CI | `src/lib/utils.test.ts`, `backend/tests/test_api_smoke.py`, `.github/workflows/ci.yml` |
+| No third-party API keys | Vertex AI via Application Default Credentials — GCP IAM only |
+
+---
 
 ## Known Limitations
 
-* AI output quality depends on prompt/model behavior and may vary by language complexity.
-* Security findings are AI-assisted and should be validated in code review.
-* The SQLite database is local-only and not designed for multi-user or networked deployments.
-* Current automated tests are intentionally compact for fast iteration and should be expanded for full release QA.
+- AI output quality depends on Gemini model behavior and may vary with code complexity.
+- Security findings are AI-assisted and should be validated in code review.
+- The SQLite database is local-only; the GCP deployment version uses Cloud Firestore.
+- The Rust `api_manager` binary must be compiled locally before first use: `cargo build --release` inside `backend/api_manager/`.
+- Automated tests are intentionally compact for fast iteration.
+
+---
+
+## License
+
+This project is part of an academic submission — AI Builder Cup 2025, Final Year Project.

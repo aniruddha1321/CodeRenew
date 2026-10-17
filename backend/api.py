@@ -1,4 +1,4 @@
-from flask import Flask, redirect, request, jsonify
+﻿from flask import Flask, redirect, request, jsonify
 from flask_cors import CORS
 import requests
 import os
@@ -40,7 +40,7 @@ CORS(app, resources={r"/*": {"origins": origins}}, supports_credentials=True)
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
-    """Health check endpoint to verify API connectivity and Groq status"""
+    """Health check endpoint to verify API connectivity and Vertex AI configuration."""
     try:
         # Basic health check
         health_status = {
@@ -104,9 +104,9 @@ def get_api_status():
             "connected": True,
             "timestamp": datetime.utcnow().isoformat(),
             "models": {
-                "available": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
-                "current": current_model,
-                "default": "llama-3.3-70b-versatile"
+                "available": ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"],
+                "current": os.getenv("VERTEX_MODEL", "gemini-1.5-pro"),
+                "default": "gemini-1.5-pro"
             },
             "features": {
                 "code_conversion": True,
@@ -348,7 +348,7 @@ def github_commit():
     return jsonify({"status": "done", "results": results})
 
 
-# ─── Clone & Convert Endpoints ───
+# â”€â”€â”€ Clone & Convert Endpoints â”€â”€â”€
 
 @app.route("/github/clone", methods=["POST"])
 def github_clone():
@@ -426,7 +426,7 @@ def github_push_branch():
     return jsonify(result)
 
 
-# ─── Knowledge Graph Endpoint ───
+# â”€â”€â”€ Knowledge Graph Endpoint â”€â”€â”€
 
 @app.route("/analyze/knowledge-graph", methods=["POST"])
 def analyze_knowledge_graph():
@@ -447,7 +447,7 @@ def analyze_knowledge_graph():
         return jsonify({"error": f"Knowledge graph generation failed: {str(e)}"}), 500
 
 
-# ─── Recovery Loop Endpoints ───
+# â”€â”€â”€ Recovery Loop Endpoints â”€â”€â”€
 
 @app.route("/recovery/start", methods=["POST"])
 def recovery_start():
@@ -537,7 +537,7 @@ def recovery_issues():
     return jsonify(result), 404
 
 
-# ─── Local Directory Scan Endpoint ───
+# â”€â”€â”€ Local Directory Scan Endpoint â”€â”€â”€
 
 @app.route("/api/scan-directory", methods=["POST"])
 def scan_directory():
@@ -584,7 +584,7 @@ def scan_directory():
     })
 
 
-# ─── Security Scan Endpoints ───
+# â”€â”€â”€ Security Scan Endpoints â”€â”€â”€
 
 @app.route("/api/security/scan-files", methods=["POST"])
 def security_scan_files():
@@ -743,82 +743,82 @@ def security_schedules():
     return jsonify({"success": True, "schedules": schedules})
 
 
-# ─── Chatbot Endpoint ───
+# â”€â”€â”€ Chatbot Endpoint â”€â”€â”€
 
 CHATBOT_SYSTEM_PROMPT = """You are CodeRenew Assistant, a helpful chatbot for the CodeRenew application.
-CodeRenew is a desktop application for legacy code modernization and cross-language code conversion, powered by AI (Groq LLMs).
+CodeRenew is a desktop application for legacy code modernization and cross-language code conversion, powered by Vertex AI (Gemini 1.5 Pro on Google Cloud).
 
 CORE FEATURES:
 
-1. **Code Workspace** — The main conversion hub. Users can:
+1. **Code Workspace** â€” The main conversion hub. Users can:
    - Upload source code files (drag-and-drop or file picker)
    - Select a conversion mode:
-     • Python 2 → Python 3 (uses lib2to3 + AI refinement for idiomatic Python 3 with type hints)
-     • Java → Python
-     • Python → Java
-     • C++ → Python
-     • JavaScript → Python
-     • TypeScript → Python
-     • C# → Python
-     • Ruby → Python
+     â€¢ Python 2 â†’ Python 3 (uses lib2to3 + AI refinement for idiomatic Python 3 with type hints)
+     â€¢ Java â†’ Python
+     â€¢ Python â†’ Java
+     â€¢ C++ â†’ Python
+     â€¢ JavaScript â†’ Python
+     â€¢ TypeScript â†’ Python
+     â€¢ C# â†’ Python
+     â€¢ Ruby â†’ Python
    - View converted code side-by-side with the original
    - Download converted files individually or as a ZIP
    - See an AI-generated explanation of what changed
 
-2. **Clone & Convert** — GitHub integration for bulk conversion:
+2. **Clone & Convert** â€” GitHub integration for bulk conversion:
    - Clone any GitHub repository by URL (supports private repos with token)
    - Browse and select specific files to convert
    - Bulk convert all selected files at once
    - Push converted files to a new branch and create a Pull Request automatically
    - View a knowledge graph of the repository structure
 
-3. **Security Scan** — Automated compliance checking:
+3. **Security Scan** â€” Automated compliance checking:
    - Scans converted code for security vulnerabilities
    - Checks against HIPAA, ISO 27001, and general security standards
    - Shows issues by severity: High, Medium, Low
    - Provides specific recommendations and fix suggestions for each issue
 
-4. **Recovery Loop** — Continuous monitoring:
+4. **Recovery Loop** â€” Continuous monitoring:
    - Monitor a GitHub repository for code issues
    - Set custom poll intervals
    - Enable auto-fix to automatically detect and propose fixes
    - View event logs and issue history
 
-5. **Dashboard** — Overview and analytics:
+5. **Dashboard** â€” Overview and analytics:
    - Total files converted, success rate, security issues found, average conversion time
    - Recent activity feed
    - Export reports as CSV or PDF
 
-6. **Summary Report** — Conversion history:
+6. **Summary Report** â€” Conversion history:
    - View all past conversion reports in a table
    - Filter by status, see execution times
    - Export data
 
-7. **Settings** — Configuration:
+7. **Settings** â€” Configuration:
    - Groq API key (required for all AI-powered features)
    - GitHub personal access token (required for GitHub features)
    - AI model selection
 
 Available AI Models (via Groq):
-- Llama 3.3 70B Versatile — most capable, best for complex conversions
-- Llama 3.1 8B Instant — fastest, good for simple tasks
-- Mixtral 8x7B — balanced speed and accuracy
-- Gemma 2 9B — compact, good code understanding
+- Llama 3.3 70B Versatile â€” most capable, best for complex conversions
+- Llama 3.1 8B Instant â€” fastest, good for simple tasks
+- Mixtral 8x7B â€” balanced speed and accuracy
+- Gemma 2 9B â€” compact, good code understanding
 
 Common user workflows:
-1. First-time setup: Go to Settings → Enter Groq API key → (Optional) Enter GitHub token
-2. Convert files: Go to Code Workspace → Select conversion mode → Upload files → Click Convert → Download
-3. Clone & convert a repo: Go to Clone & Convert → Paste repo URL → Clone → Select files → Convert → Push to new branch
+1. 1. First-time setup: Authenticate with GCP (`gcloud auth application-default login`) -> Set GCP_PROJECT in .env -> (Optional) Enter GitHub token
+2. Convert files: Go to Code Workspace â†’ Select conversion mode â†’ Upload files â†’ Click Convert â†’ Download
+3. Clone & convert a repo: Go to Clone & Convert â†’ Paste repo URL â†’ Clone â†’ Select files â†’ Convert â†’ Push to new branch
 4. Security check: After conversion, go to Security Scan to check for compliance issues
-5. Monitor a repo: Go to Recovery Loop → Enter repo URL → Start monitoring → View detected issues
+5. Monitor a repo: Go to Recovery Loop â†’ Enter repo URL â†’ Start monitoring â†’ View detected issues
 
 IMPORTANT RULES:
 - ONLY answer questions about CodeRenew features, usage, and troubleshooting.
 - If the user asks about anything unrelated to CodeRenew (weather, general knowledge, coding questions not about the app, etc.), politely respond: "I'm CodeRenew Assistant and can only help with questions about this application. Try asking about code conversion, security scanning, GitHub integration, or app settings!"
 - Keep answers concise, friendly, and actionable.
 - When explaining how to use a feature, provide step-by-step instructions.
-- If a user reports an error, suggest practical troubleshooting steps (check API key, check backend connection, etc.).
-- Do NOT say the app only does Python 2 to 3 conversion — it supports 8 conversion modes across multiple languages.
+- If a user reports an error, suggest practical troubleshooting steps (check GCP credentials, check GCP_PROJECT env var, check backend connection, etc.).
+- Do NOT say the app only does Python 2 to 3 conversion â€” it supports 8 conversion modes across multiple languages.
 """
 
 
@@ -838,7 +838,7 @@ def chat():
         api_key = fetch_api_key("groq")
         if not api_key:
             return jsonify({
-                "reply": "⚠️ Groq API key is not configured. Please go to **Settings** and add your API key first."
+                "reply": "âš ï¸ Groq API key is not configured. Please go to **Settings** and add your API key first."
             }), 200
     except Exception as e:
         return jsonify({"error": f"Failed to fetch API key: {str(e)}"}), 500
@@ -870,18 +870,18 @@ def chat():
         error_msg = str(e)
         if "rate_limit" in error_msg.lower() or "429" in error_msg:
             return jsonify({
-                "reply": "⚠️ Rate limit reached. Please wait a moment and try again."
+                "reply": "âš ï¸ Rate limit reached. Please wait a moment and try again."
             }), 200
         if "invalid_api_key" in error_msg.lower() or "401" in error_msg:
             return jsonify({
-                "reply": "⚠️ Your Groq API key is invalid or expired. Please go to **Settings** and update your API key."
+                "reply": "âš ï¸ Your Groq API key is invalid or expired. Please go to **Settings** and update your API key."
             }), 200
         if "authentication" in error_msg.lower() or "unauthorized" in error_msg.lower():
             return jsonify({
-                "reply": "⚠️ Authentication failed. Please check your Groq API key in **Settings**."
+                "reply": "âš ï¸ Authentication failed. Please check your Groq API key in **Settings**."
             }), 200
         return jsonify({
-            "reply": "⚠️ Something went wrong. Please make sure the backend is running and your API key is valid."
+            "reply": "âš ï¸ Something went wrong. Please make sure the backend is running and your API key is valid."
         }), 200
 
 

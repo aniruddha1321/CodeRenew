@@ -1,615 +1,262 @@
+﻿"""
+translate.py — AI-powered code conversion using Vertex AI (Gemini 1.5 Pro).
+All inference is done via google-cloud-aiplatform with Application Default Credentials.
+No third-party API keys are required.
+"""
+
 import os
 import sys
-import subprocess
-import json
 import time
-from groq import Groq, GroqError
-import tempfile
+import re
+
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
+
 from security_check import ai_security_check
 
-# Ensure UTF-8 encoding for subprocess calls
-os.environ['PYTHONIOENCODING'] = 'utf-8'
+# ---------------------------------------------------------------------------
+# Vertex AI initialisation
+# ---------------------------------------------------------------------------
+_GCP_PROJECT  = os.getenv("GCP_PROJECT", "")
+_GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+MODEL_NAME    = os.getenv("VERTEX_MODEL", "gemini-1.5-pro")
 
-# Build absolute path to api_manager executable based on this script's location
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_API_MANAGER = os.path.join(_SCRIPT_DIR, "api_manager", "target", "release", "api_manager.exe")
-
-
-def fetch_api_key(provider: str) -> str:
-    cmd = [_API_MANAGER, "-g", provider]
-    try:
-        # Use utf-8 encoding and handle errors gracefully
-        result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            encoding='utf-8', 
-            errors='replace',  # Replace invalid characters instead of failing
-            check=True
-        )
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr or ""
+def _init_vertex():
+    if not _GCP_PROJECT:
         raise RuntimeError(
-            f"Fail to run api_manager, provider={provider}, stderr: {stderr}"
-        ) from e
+            "GCP_PROJECT environment variable is not set. "
+            "Add it to your .env file or Cloud Run service environment."
+        )
+    vertexai.init(project=_GCP_PROJECT, location=_GCP_LOCATION)
 
-    try:
-        # The stdout should now be properly decoded UTF-8
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"api_manager return incorrect json format: {result.stdout}, error: {str(e)}")
-    
-    if data.get("provider") == provider and data.get("status") == "success":
-        key = data.get("key")
-        if key and key.strip():  # Check for non-empty key
-            return key
-        else:
-            return ""  # Return empty string if no key found
-
-    raise RuntimeError(
-        f"Failed to fetch API key for {provider}, output: {result.stdout}"
-    )
+_init_vertex()
 
 
-MODEL_NAME = "llama-3.3-70b-versatile"
-
-def get_temperature_for_model(model_name: str) -> float:
-    """Get the appropriate temperature setting for the given model."""
-    return 0.3  # Groq models work well with low temperature for code tasks
-
-def get_groq_client():
-    """Get Groq client instance, creating it lazily when needed."""
-    try:
-        api_key = fetch_api_key("groq")
-        if not api_key:
-            raise RuntimeError("No Groq API key configured")
-        return Groq(api_key=api_key)
-    except Exception as e:
-        raise RuntimeError(f"Failed to initialize Groq client: {str(e)}")
+def _get_model() -> GenerativeModel:
+    return GenerativeModel(MODEL_NAME)
 
 
-def groq_request_with_retry(client, model_name, messages, temperature=None, max_retries=3):
+def _generate(system_prompt: str, user_prompt: str, temperature: float = 0.3, max_retries: int = 3) -> str:
     """
-    Make Groq API request with retry logic for rate limiting.
+    Call Gemini via Vertex AI with retry logic.
+    Returns the raw text response.
     """
-    # Use model-appropriate temperature if not specified
-    if temperature is None:
-        temperature = get_temperature_for_model(model_name)
-    
+    model = _get_model()
+    config = GenerationConfig(temperature=temperature, max_output_tokens=8192)
+    combined = f"SYSTEM: {system_prompt}\n\nUSER: {user_prompt}"
+
     for attempt in range(max_retries):
         try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=temperature,
-            )
-            return response.choices[0].message.content
-        except GroqError as e:
-            error_str = str(e)
-            
-            # Check if it's a rate limit error
-            if "rate_limit" in error_str.lower() or "429" in error_str:
-                if attempt < max_retries - 1:
-                    # Extract wait time from error message or use exponential backoff
-                    wait_time = 20  # Default wait time
-                    if "Please try again in" in error_str:
-                        try:
-                            # Extract wait time from error message
-                            import re
-                            match = re.search(r'try again in (\d+)s', error_str)
-                            if match:
-                                wait_time = int(match.group(1))
-                        except:
-                            pass
-                    
-                    print(f"Rate limit hit, waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise RuntimeError(f"Rate limit exceeded after {max_retries} attempts: {error_str}")
+            response = model.generate_content(combined, generation_config=config)
+            return response.text
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"Vertex AI call failed (attempt {attempt + 1}): {exc}. Retrying in {wait}s.")
+                time.sleep(wait)
             else:
-                # Non-rate-limit error, don't retry
-                raise RuntimeError(f"Groq request failed: {error_str}")
-    
-    raise RuntimeError("Max retries exceeded")
+                raise RuntimeError(
+                    f"Vertex AI request failed after {max_retries} attempts: {exc}"
+                ) from exc
 
 
-def read_code(path):
-    with open(path, encoding="utf-8") as f:
+# ---------------------------------------------------------------------------
+# Response cleaning
+# ---------------------------------------------------------------------------
+
+def clean_ai_response(response: str, language: str = "python") -> str:
+    """Strip markdown code fences from AI response."""
+    if not response:
+        return response
+    response = response.strip()
+    patterns = [
+        rf"```{re.escape(language)}\n?(.*?)```",
+        r"```\w*\n?(.*?)```",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return response
+
+
+def read_code(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
-def write_tmp(path, content):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+# ---------------------------------------------------------------------------
+# Migration (legacy modernisation)
+# ---------------------------------------------------------------------------
 
-
-def clean_ai_response(response: str, language: str = "python") -> str:
+def migrate_code_str(code: str) -> tuple:
     """
-    Clean AI response to remove any markdown formatting that might have slipped through.
-    This ensures we get only raw code in the specified language.
+    Modernise legacy Python 2 code to idiomatic Python 3.
+    Returns (modernised_code, explanation, security_issues).
     """
-    if not response:
-        return response
-    
-    # Remove markdown code blocks (```python, ```java, ```, etc.)
-    import re
-    
-    # Pattern to match code blocks: ```python\n...code...\n``` or ```java\n...code...\n``` or ```\n...code...\n```
-    lang_tags = r'python|java|cpp|c\+\+|javascript|typescript|csharp|cs|ruby'
-    code_block_pattern = rf'```(?:{lang_tags})?\s*\n?(.*?)\n?```'
-    
-    # Check if the response is wrapped in code blocks
-    match = re.search(code_block_pattern, response, re.DOTALL)
-    if match:
-        # Extract just the code content
-        cleaned = match.group(1).strip()
-    else:
-        # If no code blocks found, just clean up any stray backticks
-        cleaned = response.strip()
-        # Remove any leading/trailing triple backticks
-        cleaned = re.sub(r'^```(?:python|java|cpp|c\+\+|javascript|typescript|csharp|cs|ruby)?\s*\n?', '', cleaned)
-        cleaned = re.sub(r'\n?```\s*$', '', cleaned)
-    
-    # Remove any explanatory text that might appear before the code
-    lines = cleaned.split('\n')
-    start_idx = 0
-    
-    # Language-specific code start detection
-    if language == "java":
-        java_keywords = ('import ', 'package ', 'public ', 'private ', 'protected ',
-                         'class ', 'interface ', 'abstract ', 'final ', 'static ',
-                         'void ', 'int ', 'String ', 'boolean ', 'double ', 'float ',
-                         '//', '/*', '@', 'enum ')
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith(java_keywords) or '=' in stripped or stripped.endswith('{'):
-                start_idx = i
-                break
-            if any(phrase in stripped.lower() for phrase in [
-                'here', 'convert', 'java', 'code', 'result', 'output'
-            ]):
-                continue
-            else:
-                start_idx = i
-                break
-    else:
-        # Python code start detection
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if (stripped.startswith(('import ', 'from ', 'def ', 'class ', 'if ', 'for ', 'while ', 
-                                    'try:', 'with ', '#', 'print(', 'return ')) or
-                '=' in stripped or stripped.endswith(':')):
-                start_idx = i
-                break
-            if any(phrase in stripped.lower() for phrase in [
-                'here', 'convert', 'moderniz', 'python', 'code', 'result', 'output'
-            ]):
-                continue
-            else:
-                start_idx = i
-                break
-    
-    # Rejoin from the detected start point
-    cleaned = '\n'.join(lines[start_idx:]).strip()
-    
-    return cleaned
-
-
-def ai_migrate(code, model_name=None):
-    if model_name is None:
-        model_name = MODEL_NAME
-    
-        
     system_prompt = (
-        "You modernize Python 2 code into idiomatic Python 3 with type hints. "
-        "CRITICAL: Your response must ONLY contain raw Python code. "
-        "DO NOT include markdown code blocks, backticks, or any formatting. "
-        "DO NOT include explanations, comments, or text before or after the code."
+        "You modernise legacy Python 2 code to idiomatic Python 3. "
+        "CRITICAL: Your response must contain ONLY raw Python code. "
+        "Do NOT include markdown fences, backticks, or any text before or after the code."
     )
     user_prompt = (
-        "Below is Python 3 code translated from Python 2 using 2to3. "
-        "Label all variable types explicitly and add type annotations to all functions and variables. "
-        "Remove unnecessary comments, whitespace and unused imports. "
-        "Improve the code to make it idiomatic and robust in Python 3.\n\n"
-        "IMPORTANT: Respond with ONLY the raw Python code. "
-        "DO NOT wrap your response in ```python or ``` or any other markdown formatting. "
-        "DO NOT add any explanatory text before or after the code.\n\n"
+        "Modernise the following legacy Python code to Python 3. "
+        "Fix deprecated APIs, use f-strings, pathlib, type hints, and modern idioms. "
+        "IMPORTANT: Respond with ONLY the raw Python code.\n\n"
         f"{code}"
     )
-    try:
-        client = get_groq_client()
-        raw_response = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-        )
-        # Clean the response to remove any markdown formatting
-        resp = clean_ai_response(raw_response)
-        
-        # Add a small delay before the next API call to prevent rate limiting
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    compare_prompt = (
-        "Here are two versions of code. The first is Python 2 and the second is the modernized Python 3 version. "
-        "Provide a bullet-point list explaining what changed.\n"
-        f"Python2 Code:\n{code}\nPython3 Code:\n{resp}"
+
+    resp = clean_ai_response(_generate(system_prompt, user_prompt), "python")
+
+    explanation = _generate(
+        "You explain Python 2 to Python 3 migration changes concisely in bullet points. "
+        "Provide no more than 10 specific, technical bullet points.",
+        f"Python 2:\n{code}\n\nPython 3:\n{resp}",
+        temperature=0.4,
     )
-    try:
-        # Use slightly higher temperature for comparison
-        comparison_temp = 0.4
-        # Use a different system prompt for explanation generation
-        explanation_system_prompt = (
-            "You are a helpful assistant that explains Python 2 to Python 3 modernization changes clearly and concisely. "
-            "When given Python 2 code and its Python 3 equivalent, provide a bullet-point list of the key modernization changes. "
-            "Focus on Python 2 to 3 specific improvements like print statements, string handling, iterator changes, type annotations, etc. "
-            "Provide no more than 10 bullet points. Be specific and technical about the Python version differences."
-        )
-        
-        compare = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": explanation_system_prompt},
-                {"role": "user", "content": compare_prompt},
-            ],
-            temperature=comparison_temp
-        )
-        
-        # Add a small delay after explanation generation before security check
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    return (resp, compare)
+
+    security_issues = ai_security_check(resp, "migrated_code.py")
+    return resp, explanation, security_issues
 
 
-from lib2to3.refactor import RefactoringTool, get_fixers_from_package
+# ---------------------------------------------------------------------------
+# Specialised conversions
+# ---------------------------------------------------------------------------
 
-
-def run_2to3(src_path, dst_path):
-    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-    with open(src_path, "r", encoding="utf-8") as src_file:
-        code = src_file.read()
-    
-    # Validate that the code is not empty
-    if not code.strip():
-        raise ValueError("Input code is empty")
-    
-    # Ensure code ends with newline (required by lib2to3)
-    if not code.endswith('\n'):
-        code += '\n'
-    
-    fixer_pkg = "lib2to3.fixes"
-    tool = RefactoringTool(get_fixers_from_package(fixer_pkg))
-    
-    try:
-        tree = tool.refactor_string(code, src_path)
-        if tree is None:
-            raise ValueError("lib2to3 failed to parse the code - it may contain syntax errors")
-    except Exception as e:
-        raise ValueError(f"lib2to3 parsing error: {str(e)}")
-    
-    with open(dst_path, "w", encoding="utf-8") as dst_file:
-        dst_file.write(str(tree))
-
-
-def migrate_file(src_path, dst_path, model_name=None):
-    run_2to3(src_path, dst_path)
-    code3 = read_code(dst_path)
-    code3_improved = ai_migrate(code3, model_name)[0]
-    write_tmp(dst_path, code3_improved)
-
-
-def migrate_dir(src_dir, dst_dir):
-    os.makedirs(dst_dir, exist_ok=True)
-    for fname in os.listdir(src_dir):
-        if not fname.endswith(".py"):
-            continue
-        migrate_file(
-            os.path.join(src_dir, fname),
-            os.path.join(dst_dir, fname),
-        )
-
-
-def migrate_code_str(code_str, filename="code.py", model_name=None):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        src_path = os.path.join(tmpdir, "src.py")
-        dst_path = os.path.join(tmpdir, "dst.py")
-        
-        try:
-            # Validate that the code is not empty
-            if not code_str.strip():
-                raise ValueError("Input code is empty")
-            
-            # Handle encoding issues - ensure code_str is properly encoded
-            try:
-                # Try to encode and decode to ensure it's valid UTF-8
-                code_str.encode('utf-8').decode('utf-8')
-            except UnicodeEncodeError as e:
-                raise ValueError(f"Input contains invalid characters that cannot be encoded: {str(e)}")
-            except UnicodeDecodeError as e:
-                raise ValueError(f"Input encoding error: {str(e)}")
-            
-            # Ensure code ends with newline (required by lib2to3)
-            if not code_str.endswith('\n'):
-                code_str += '\n'
-            
-            with open(src_path, "w", encoding="utf-8") as f:
-                f.write(code_str)
-            
-            # Add error handling for lib2to3 parsing
-            try:
-                run_2to3(src_path, dst_path)
-            except Exception as e:
-                raise RuntimeError(f"Failed to parse Python 2 code with lib2to3: {str(e)}")
-            
-            code3 = read_code(dst_path)
-            code3_improved, explanation = ai_migrate(code3, model_name)
-            security_issues = ai_security_check(code3_improved, filename, model_name)
-
-            return code3_improved, explanation, security_issues
-        except Exception as e:
-            raise RuntimeError(f"Migration failed: {str(e)}")
-
-
-def ai_convert_java_to_python(code, model_name=None):
-    """Convert Java code to idiomatic Python 3 using AI."""
-    if model_name is None:
-        model_name = MODEL_NAME
-    
+def ai_convert_java_to_python(code: str, model_name: str = None) -> tuple:
+    """Convert Java code to idiomatic Python 3."""
     system_prompt = (
-        "You convert Java code into idiomatic Python 3 with type hints. "
-        "CRITICAL: Your response must ONLY contain raw Python code. "
-        "DO NOT include markdown code blocks, backticks, or any formatting. "
-        "DO NOT include explanations, comments, or text before or after the code."
+        "You convert Java code to idiomatic Python 3. "
+        "CRITICAL: Your response must contain ONLY raw Python code. "
+        "Do NOT include markdown fences, backticks, or explanatory text."
     )
     user_prompt = (
-        "Below is Java code. Convert it to idiomatic Python 3 code. "
-        "Use Python best practices: type hints, list comprehensions, context managers, etc. "
-        "Map Java collections to Python equivalents (ArrayList->list, HashMap->dict, etc.). "
-        "Convert Java-style getters/setters to Python properties where appropriate. "
-        "Use snake_case for function/variable names (converted from camelCase). "
-        "Add proper Python docstrings for classes and methods.\n\n"
-        "IMPORTANT: Respond with ONLY the raw Python code. "
-        "DO NOT wrap your response in ```python or ``` or any other markdown formatting. "
-        "DO NOT add any explanatory text before or after the code.\n\n"
+        "Convert the following Java code to idiomatic Python 3. "
+        "Use snake_case, list comprehensions, dataclasses where appropriate, "
+        "and remove Java-specific boilerplate. "
+        "IMPORTANT: Respond with ONLY the raw Python code.\n\n"
         f"{code}"
     )
-    try:
-        client = get_groq_client()
-        raw_response = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-        )
-        resp = clean_ai_response(raw_response, "python")
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    
-    compare_prompt = (
-        "Here are two versions of code. The first is Java and the second is the Python 3 conversion. "
-        "Provide a bullet-point list explaining the key changes made during conversion.\n"
-        f"Java Code:\n{code}\nPython Code:\n{resp}"
+
+    resp = clean_ai_response(_generate(system_prompt, user_prompt), "python")
+
+    explanation = _generate(
+        "You explain Java to Python conversion changes concisely in bullet points. "
+        "Provide no more than 10 specific, technical bullet points.",
+        f"Java:\n{code}\n\nPython:\n{resp}",
+        temperature=0.4,
     )
-    try:
-        explanation_system_prompt = (
-            "You are a helpful assistant that explains Java to Python conversion changes clearly and concisely. "
-            "When given Java code and its Python equivalent, provide a bullet-point list of key conversion changes. "
-            "Focus on language-specific differences like type system changes, collection mappings, naming conventions, "
-            "OOP pattern differences, and Pythonic idioms applied. "
-            "Provide no more than 10 bullet points. Be specific and technical."
-        )
-        compare = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": explanation_system_prompt},
-                {"role": "user", "content": compare_prompt},
-            ],
-            temperature=0.4
-        )
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    return (resp, compare)
+    return resp, explanation
 
 
-def ai_convert_python_to_java(code, model_name=None):
-    """Convert Python code to idiomatic Java using AI."""
-    if model_name is None:
-        model_name = MODEL_NAME
-    
+def ai_convert_python_to_java(code: str, model_name: str = None) -> tuple:
+    """Convert Python code to idiomatic Java."""
     system_prompt = (
-        "You convert Python code into idiomatic Java. "
-        "CRITICAL: Your response must ONLY contain raw Java code. "
-        "DO NOT include markdown code blocks, backticks, or any formatting. "
-        "DO NOT include explanations, comments, or text before or after the code."
+        "You convert Python code to idiomatic Java. "
+        "CRITICAL: Your response must contain ONLY raw Java code. "
+        "Do NOT include markdown fences, backticks, or explanatory text."
     )
     user_prompt = (
-        "Below is Python code. Convert it to idiomatic Java code. "
-        "Use Java best practices: proper class structure, access modifiers, strong typing. "
-        "Map Python types to Java equivalents (list->ArrayList, dict->HashMap, tuple->record/class, etc.). "
-        "Convert Python properties to Java getters/setters where appropriate. "
-        "Use camelCase for methods/variables (converted from snake_case). "
-        "Add proper Javadoc comments for classes and methods. "
-        "Include necessary import statements.\n\n"
-        "IMPORTANT: Respond with ONLY the raw Java code. "
-        "DO NOT wrap your response in ```java or ``` or any other markdown formatting. "
-        "DO NOT add any explanatory text before or after the code.\n\n"
+        "Convert the following Python code to idiomatic Java. "
+        "Use proper class structure, access modifiers, strong typing, "
+        "camelCase naming, and Javadoc comments. "
+        "Map Python types: list->ArrayList, dict->HashMap. "
+        "IMPORTANT: Respond with ONLY the raw Java code.\n\n"
         f"{code}"
     )
-    try:
-        client = get_groq_client()
-        raw_response = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-        )
-        resp = clean_ai_response(raw_response, "java")
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    
-    compare_prompt = (
-        "Here are two versions of code. The first is Python and the second is the Java conversion. "
-        "Provide a bullet-point list explaining the key changes made during conversion.\n"
-        f"Python Code:\n{code}\nJava Code:\n{resp}"
+
+    resp = clean_ai_response(_generate(system_prompt, user_prompt), "java")
+
+    explanation = _generate(
+        "You explain Python to Java conversion changes concisely in bullet points. "
+        "Provide no more than 10 specific, technical bullet points.",
+        f"Python:\n{code}\n\nJava:\n{resp}",
+        temperature=0.4,
     )
-    try:
-        explanation_system_prompt = (
-            "You are a helpful assistant that explains Python to Java conversion changes clearly and concisely. "
-            "When given Python code and its Java equivalent, provide a bullet-point list of key conversion changes. "
-            "Focus on language-specific differences like type system changes, collection mappings, naming conventions, "
-            "OOP pattern differences, and Java-specific patterns applied. "
-            "Provide no more than 10 bullet points. Be specific and technical."
-        )
-        compare = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": explanation_system_prompt},
-                {"role": "user", "content": compare_prompt},
-            ],
-            temperature=0.4
-        )
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    return (resp, compare)
+    return resp, explanation
 
 
-def ai_convert_generic(code, source_lang, target_lang, model_name=None):
-    """Generic AI-powered code conversion between any two languages."""
-    if model_name is None:
-        model_name = MODEL_NAME
-
-    target_clean = clean_ai_response.__name__  # just to reference; actual language tag below
+def ai_convert_generic(code: str, source_lang: str, target_lang: str, model_name: str = None) -> tuple:
+    """Generic AI-powered code conversion between any two supported languages."""
     output_lang_tag = "python" if "python" in target_lang.lower() else target_lang.lower()
 
     system_prompt = (
-        f"You convert {source_lang} code into idiomatic {target_lang} code. "
-        "CRITICAL: Your response must ONLY contain raw code. "
-        "DO NOT include markdown code blocks, backticks, or any formatting. "
-        "DO NOT include explanations, comments, or text before or after the code."
+        f"You convert {source_lang} code to idiomatic {target_lang} code. "
+        "CRITICAL: Your response must contain ONLY raw code. "
+        "Do NOT include markdown fences, backticks, or explanatory text."
     )
     user_prompt = (
-        f"Below is {source_lang} code. Convert it to idiomatic {target_lang} code.\n"
-        f"Use {target_lang} best practices and conventions.\n"
-        "Map data structures and idioms to the target language equivalents.\n\n"
-        "IMPORTANT: Respond with ONLY the raw code. "
-        "DO NOT wrap your response in ``` or any other markdown formatting. "
-        "DO NOT add any explanatory text before or after the code.\n\n"
+        f"Convert the following {source_lang} code to idiomatic {target_lang}. "
+        f"Use {target_lang} best practices and conventions. "
+        "IMPORTANT: Respond with ONLY the raw code.\n\n"
         f"{code}"
     )
-    try:
-        client = get_groq_client()
-        raw_response = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-        )
-        resp = clean_ai_response(raw_response, output_lang_tag)
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
 
-    compare_prompt = (
-        f"Here are two versions of code. The first is {source_lang} and the second is the {target_lang} conversion. "
-        "Provide a bullet-point list explaining the key changes made during conversion.\n"
-        f"{source_lang} Code:\n{code}\n{target_lang} Code:\n{resp}"
+    resp = clean_ai_response(_generate(system_prompt, user_prompt), output_lang_tag)
+
+    explanation = _generate(
+        f"You explain {source_lang} to {target_lang} conversion changes concisely in bullet points. "
+        "Provide no more than 10 specific, technical bullet points.",
+        f"{source_lang}:\n{code}\n\n{target_lang}:\n{resp}",
+        temperature=0.4,
     )
-    try:
-        explanation_system_prompt = (
-            f"You are a helpful assistant that explains {source_lang} to {target_lang} conversion changes clearly and concisely. "
-            f"Provide a bullet-point list of key conversion changes. "
-            "Focus on language-specific differences, idiom mappings, and best practices applied. "
-            "Provide no more than 10 bullet points. Be specific and technical."
-        )
-        compare = groq_request_with_retry(
-            client=client,
-            model_name=model_name,
-            messages=[
-                {"role": "system", "content": explanation_system_prompt},
-                {"role": "user", "content": compare_prompt},
-            ],
-            temperature=0.4
-        )
-        time.sleep(1)
-    except Exception as e:
-        raise RuntimeError(f"Groq request failed: {e}") from e
-    return (resp, compare)
+    return resp, explanation
 
 
-# Mode configuration: maps mode string to (source_lang, target_lang, output_language_for_security)
+# ---------------------------------------------------------------------------
+# Conversion mode dispatch
+# ---------------------------------------------------------------------------
+
 CONVERSION_MODES = {
-    "java2py":   ("Java", "Python", "python"),
-    "py2java":   ("Python", "Java", "java"),
-    "cpp2py":    ("C++", "Python", "python"),
-    "js2py":     ("JavaScript", "Python", "python"),
-    "ts2py":     ("TypeScript", "Python", "python"),
-    "cs2py":     ("C#", "Python", "python"),
-    "rb2py":     ("Ruby", "Python", "python"),
+    "java2py": ("Java",       "Python",     "python"),
+    "py2java": ("Python",     "Java",       "java"),
+    "cpp2py":  ("C++",        "Python",     "python"),
+    "js2py":   ("JavaScript", "Python",     "python"),
+    "ts2py":   ("TypeScript", "Python",     "python"),
+    "cs2py":   ("C#",         "Python",     "python"),
+    "rb2py":   ("Ruby",       "Python",     "python"),
 }
 
 
-def convert_code_str(code_str, mode, filename="code", model_name=None):
+def convert_code_str(code_str: str, mode: str, filename: str = "code", model_name: str = None) -> tuple:
     """
     Convert code between languages based on the specified mode.
-    Returns (converted_code, explanation, security_issues)
+    Returns (converted_code, explanation, security_issues).
     """
     if not code_str.strip():
         raise ValueError("Input code is empty")
-    
+
     try:
-        code_str.encode('utf-8').decode('utf-8')
-    except (UnicodeEncodeError, UnicodeDecodeError) as e:
-        raise ValueError(f"Input encoding error: {str(e)}")
-    
+        code_str.encode("utf-8").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"Input encoding error: {exc}")
+
     try:
-        # Use existing specialized functions for Java conversions (they have tailored prompts)
         if mode == "java2py":
-            converted_code, explanation = ai_convert_java_to_python(code_str, model_name)
-            security_issues = ai_security_check(converted_code, filename, model_name, language="python")
-            return converted_code, explanation, security_issues
+            converted, explanation = ai_convert_java_to_python(code_str)
+            security = ai_security_check(converted, filename, language="python")
+            return converted, explanation, security
         elif mode == "py2java":
-            converted_code, explanation = ai_convert_python_to_java(code_str, model_name)
-            security_issues = ai_security_check(converted_code, filename, model_name, language="java")
-            return converted_code, explanation, security_issues
+            converted, explanation = ai_convert_python_to_java(code_str)
+            security = ai_security_check(converted, filename, language="java")
+            return converted, explanation, security
         elif mode in CONVERSION_MODES:
             source_lang, target_lang, sec_lang = CONVERSION_MODES[mode]
-            converted_code, explanation = ai_convert_generic(code_str, source_lang, target_lang, model_name)
-            security_issues = ai_security_check(converted_code, filename, model_name, language=sec_lang)
-            return converted_code, explanation, security_issues
+            converted, explanation = ai_convert_generic(code_str, source_lang, target_lang)
+            security = ai_security_check(converted, filename, language=sec_lang)
+            return converted, explanation, security
         else:
             raise ValueError(f"Unsupported conversion mode: {mode}")
-    except Exception as e:
-        raise RuntimeError(f"Conversion failed: {str(e)}")
+    except Exception as exc:
+        raise RuntimeError(f"Conversion failed: {exc}") from exc
 
 
 def main():
-    src = sys.argv[1]
-    if os.path.isfile(src):
-        res = migrate_code_str(read_code(src))
-        #print(f"Code: \n{res[0]}\nExplain: {res[1]}\nSecurity Issues: {res[2]}")
+    if len(sys.argv) > 1:
+        src = sys.argv[1]
+        if os.path.isfile(src):
+            result = migrate_code_str(read_code(src))
+            print(result)
 
 
 if __name__ == "__main__":
